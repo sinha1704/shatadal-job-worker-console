@@ -110,6 +110,8 @@ ${knowledgeContext}`
 
 function getLocalFallbackResponse(message: string): string {
   const msg = message.toLowerCase();
+  const isVercelEnv = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+  const configLocation = isVercelEnv ? "Vercel Environment Variables Dashboard" : ".env file";
   
   if (msg.includes("shatadal")) {
     return "Shatadal Sundar Sinha is a professional Full-Stack Developer with 4+ years of experience building high-performance web applications across SaaS, EdTech, and PropTech domains. He specializes in React.js, Next.js, TypeScript, Angular, and Node.js. He is currently working as a Lead Front-End Developer, building CRM portals, AI-Powered resume builders, and payment integrations.";
@@ -130,8 +132,8 @@ function getLocalFallbackResponse(message: string): string {
     return "Here is a quick startup idea: A glassmorphic personal assistant platform that integrates multiple local models to work completely offline, guaranteeing data privacy!";
   }
   if (msg.includes("hello") || msg.includes("hi") || msg.includes("hey")) {
-    return "Hello! I am Shatadal Personal Assistant. Please add your GROQ_API_KEY to .env to unlock my full AI capability!";
+    return `Hello! I am Shatadal's Personal Assistant. Please configure your GROQ_API_KEY in the ${configLocation} to unlock my full AI capability!`;
   }
   
-  return "I'm in offline fallback mode. Please add your GROQ_API_KEY to the .env file to enable full AI responses!";
+  return `I'm in offline fallback mode. Please configure your GROQ_API_KEY in the ${configLocation} to enable full AI responses!`;
 }
