@@ -4,12 +4,18 @@ import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
-const KB_PATH = path.join(process.cwd(), 'data', 'knowledge.json');
+const isVercel = process.env.VERCEL === '1';
+const REPO_KB_PATH = path.join(process.cwd(), 'data', 'knowledge.json');
+const TMP_KB_PATH = '/tmp/data/knowledge.json';
 
 async function loadKnowledgeContext(): Promise<string> {
   try {
-    if (!existsSync(KB_PATH)) return '';
-    const raw = await readFile(KB_PATH, 'utf-8');
+    let activePath = REPO_KB_PATH;
+    if (isVercel && existsSync(TMP_KB_PATH)) {
+      activePath = TMP_KB_PATH;
+    }
+    if (!existsSync(activePath)) return '';
+    const raw = await readFile(activePath, 'utf-8');
     const kb = JSON.parse(raw);
     if (!kb.entries || kb.entries.length === 0) return '';
     // Combine all entries, cap at 8000 chars total to save tokens

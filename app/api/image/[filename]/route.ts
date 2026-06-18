@@ -11,7 +11,10 @@ export async function GET(
   
   // Sanitize filename to prevent directory traversal
   const safe = path.basename(filename);
-  const filePath = path.join(process.cwd(), 'data', 'images', safe);
+  const isVercel = process.env.VERCEL === '1';
+  const filePath = isVercel
+    ? path.join('/tmp/data/images', safe)
+    : path.join(process.cwd(), 'data', 'images', safe);
   
   if (!existsSync(filePath)) {
     return new NextResponse('Not found', { status: 404 });

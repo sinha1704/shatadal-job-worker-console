@@ -1,12 +1,33 @@
 import "pdf-parse/worker";
 import { NextResponse } from 'next/server';
-import { writeFile, readFile, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, copyFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const KB_PATH = path.join(DATA_DIR, 'knowledge.json');
-const IMAGES_DIR = path.join(DATA_DIR, 'images');
+const isVercel = process.env.VERCEL === '1';
+const REPO_DATA_DIR = path.join(process.cwd(), 'data');
+const REPO_KB_PATH = path.join(REPO_DATA_DIR, 'knowledge.json');
+
+const RUNTIME_DATA_DIR = isVercel ? '/tmp/data' : REPO_DATA_DIR;
+const RUNTIME_KB_PATH = path.join(RUNTIME_DATA_DIR, 'knowledge.json');
+const RUNTIME_IMAGES_DIR = path.join(RUNTIME_DATA_DIR, 'images');
+
+// Lock runtime database directories & copy repository seed file if on Vercel
+async function ensureRuntimeFiles() {
+  if (!existsSync(RUNTIME_DATA_DIR)) {
+    await mkdir(RUNTIME_DATA_DIR, { recursive: true });
+  }
+  if (!existsSync(RUNTIME_IMAGES_DIR)) {
+    await mkdir(RUNTIME_IMAGES_DIR, { recursive: true });
+  }
+  if (isVercel && !existsSync(RUNTIME_KB_PATH) && existsSync(REPO_KB_PATH)) {
+    try {
+      await copyFile(REPO_KB_PATH, RUNTIME_KB_PATH);
+    } catch (err) {
+      console.error('Failed to copy seed knowledge database:', err);
+    }
+  }
+}
 
 const ALLOWED_TYPES: Record<string, string> = {
   '.txt': 'text',
@@ -23,8 +44,9 @@ const ALLOWED_TYPES: Record<string, string> = {
 // GET - list all knowledge entries (metadata only)
 export async function GET() {
   try {
-    if (!existsSync(KB_PATH)) return NextResponse.json({ entries: [] });
-    const raw = await readFile(KB_PATH, 'utf-8');
+    await ensureRuntimeFiles();
+    if (!existsSync(RUNTIME_KB_PATH)) return NextResponse.json({ entries: [] });
+    const raw = await readFile(RUNTIME_KB_PATH, 'utf-8');
     const kb = JSON.parse(raw);
     const entries = (kb.entries || []).map(({ id, filename, uploadedAt, size, charCount, type, imageUrl }: any) => ({
       id, filename, uploadedAt, size, charCount, type, imageUrl
@@ -56,9 +78,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `File too large (max ${MAX_SIZE / 1024 / 1024}MB for ${fileType})` }, { status: 400 });
     }
 
-    // Ensure directories
-    if (!existsSync(DATA_DIR)) await mkdir(DATA_DIR, { recursive: true });
-    if (!existsSync(IMAGES_DIR)) await mkdir(IMAGES_DIR, { recursive: true });
+    await ensureRuntimeFiles();
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
@@ -74,7 +94,6 @@ export async function POST(req: Request) {
     // ---- PDF FILES ----
     if (fileType === 'pdf') {
       try {
-        // Dynamic import of mehmet-kozan/pdf-parse v2 module
         const pdfModule = await import('pdf-parse') as any;
         const PDFParseClass = pdfModule.PDFParse;
         
@@ -96,13 +115,11 @@ export async function POST(req: Request) {
 
     // ---- IMAGE FILES ----
     if (fileType === 'image') {
-      // Save image locally for serving
       const safeName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const imagePath = path.join(IMAGES_DIR, safeName);
+      const imagePath = path.join(RUNTIME_IMAGES_DIR, safeName);
       await writeFile(imagePath, buffer);
       imageUrl = `/api/image/${safeName}`;
 
-      // Use Groq vision to describe the image
       const apiKey = process.env.GROQ_API_KEY;
       if (apiKey) {
         try {
@@ -139,8 +156,8 @@ export async function POST(req: Request) {
 
     // Load or init knowledge base
     let kb: { entries: any[] } = { entries: [] };
-    if (existsSync(KB_PATH)) {
-      const raw = await readFile(KB_PATH, 'utf-8');
+    if (existsSync(RUNTIME_KB_PATH)) {
+      const raw = await readFile(RUNTIME_KB_PATH, 'utf-8');
       kb = JSON.parse(raw);
     }
 
@@ -159,7 +176,7 @@ export async function POST(req: Request) {
     };
 
     kb.entries.push(entry);
-    await writeFile(KB_PATH, JSON.stringify(kb, null, 2), 'utf-8');
+    await writeFile(RUNTIME_KB_PATH, JSON.stringify(kb, null, 2), 'utf-8');
 
     return NextResponse.json({
       success: true,
@@ -176,11 +193,12 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const { id } = await req.json();
-    if (!existsSync(KB_PATH)) return NextResponse.json({ error: 'No KB' }, { status: 404 });
-    const raw = await readFile(KB_PATH, 'utf-8');
+    await ensureRuntimeFiles();
+    if (!existsSync(RUNTIME_KB_PATH)) return NextResponse.json({ error: 'No KB' }, { status: 404 });
+    const raw = await readFile(RUNTIME_KB_PATH, 'utf-8');
     const kb = JSON.parse(raw);
     kb.entries = kb.entries.filter((e: any) => e.id !== id);
-    await writeFile(KB_PATH, JSON.stringify(kb, null, 2), 'utf-8');
+    await writeFile(RUNTIME_KB_PATH, JSON.stringify(kb, null, 2), 'utf-8');
     return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
