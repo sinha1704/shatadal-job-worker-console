@@ -305,8 +305,8 @@ export default function ChatPage() {
 
             {/* Profile Avatar indicator */}
             <div className="relative group">
-              <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700/60 flex items-center justify-center font-bold text-slate-300 select-none cursor-pointer">
-                S
+              <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700/60 flex items-center justify-center bg-slate-800 cursor-pointer">
+                <img src="/profile-pic.jpg" alt="Shatadal Sundar Sinha" className="w-full h-full object-cover" />
               </div>
               <div className="absolute right-0 bottom-0 w-2.5 h-2.5 rounded-full border border-slate-900 bg-emerald-500" />
             </div>
@@ -399,8 +399,8 @@ export default function ChatPage() {
         <div className="p-5 border-b border-slate-800/40">
           <div className="glass-card bg-slate-950/40 rounded-2xl p-4 border border-indigo-500/10">
             <div className="flex items-center space-x-3">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center font-bold text-white text-base select-none shadow-inner flex-shrink-0">
-                S
+              <div className="w-11 h-11 rounded-xl overflow-hidden border border-indigo-500/20 flex items-center justify-center flex-shrink-0 shadow-inner">
+                <img src="/profile-pic.jpg" alt="Shatadal Sundar Sinha" className="w-full h-full object-cover" />
               </div>
               <div className="overflow-hidden">
                 <h3 className="text-xs font-bold text-slate-200 truncate">Shatadal Sundar Sinha</h3>
@@ -660,26 +660,23 @@ export default function ChatPage() {
                   <div className="absolute inset-0 rounded-[24px] bg-gradient-to-tr from-indigo-500 via-purple-500 to-blue-600 blur-2xl opacity-20 group-hover:opacity-30 transition-all duration-700" />
                   
                   <div
-                    className="relative w-24 h-24 rounded-[24px] flex items-center justify-center"
+                    className="relative w-24 h-24 rounded-[24px] overflow-hidden flex items-center justify-center"
                     style={{
                       background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(11,15,25,0.9), rgba(59,130,246,0.15))',
                       boxShadow: '0 0 0 1px rgba(99,102,241,0.18), 0 16px 40px rgba(0, 0, 0, 0.4)',
                     }}
                   >
-                    <div className="absolute inset-1 rounded-[18px] bg-gradient-to-tr from-indigo-500/10 via-transparent to-blue-500/10" />
-                    <div className="scan-line" />
+                    <div className="absolute inset-1 rounded-[18px] bg-gradient-to-tr from-indigo-500/10 via-transparent to-blue-500/10 z-10" />
+                    <div className="scan-line z-10" />
 
-                    <svg
-                      className="relative w-11 h-11 text-indigo-400 group-hover:text-indigo-300 transition-colors animate-float-icon"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
+                    <img
+                      src="/profile-pic.jpg"
+                      alt="Shatadal Sundar Sinha"
+                      className="w-full h-full object-cover relative transition-transform duration-500 group-hover:scale-105"
+                    />
 
-                    <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                    <div className="absolute bottom-2 left-2 w-1 h-1 rounded-full bg-blue-400" />
+                    <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse z-10" />
+                    <div className="absolute bottom-2 left-2 w-1 h-1 rounded-full bg-blue-400 z-10" />
                   </div>
                 </div>
 
@@ -732,10 +729,8 @@ export default function ChatPage() {
                   >
                     {/* AI Avatar */}
                     {msg.role === 'ai' && (
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500/20 to-blue-600/20 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 shadow-md mb-2">
-                        <svg className="w-4.5 h-4.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
+                      <div className="w-8 h-8 rounded-xl overflow-hidden border border-indigo-500/20 flex items-center justify-center flex-shrink-0 shadow-md mb-2 bg-slate-900">
+                        <img src="/profile-pic.jpg" alt="Shatadal AI Agent" className="w-full h-full object-cover" />
                       </div>
                     )}
 

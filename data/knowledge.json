@@ -8,6 +8,15 @@
       "uploadedAt": "2026-06-18T04:19:49.501Z",
       "size": 76746,
       "charCount": 5674
+    },
+    {
+      "id": "1781760938796",
+      "filename": "profile_metadata.json",
+      "type": "text",
+      "content": "{\n  \"profile\": {\n    \"name\": \"Shatadal Sundar Sinha\",\n    \"role\": \"Senior Front-End Developer\",\n    \"date_of_birth\": \"2001-04-17\",\n    \"contact\": {\n      \"email\": \"shatadal17@gmail.com\",\n      \"phone\": [\"+91 70636 44658\", \"+91 93824 68250\"],\n      \"location\": \"Kolkata, West Bengal, India\"\n    },\n    \"origins\": {\n      \"hometown\": \"Kandi, Murshidabad\",\n      \"state\": \"West Bengal\",\n      \"pin_code\": \"742137\"\n    },\n    \"family_details\": {\n      \"father_name\": \"Chira Sundar Sinha\",\n      \"mother_name\": \"Chaitali Sinha\",\n      \"brother_name\": \"Shatadeep Sundar Sinha\",\n      \"pisi_name\": \"Dharashri Sinha\",\n      \"jethu_name\": \"Krishna Sundar Sinha\"\n    },\n    \"links\": {\n      \"portfolio_ai\": \"https://shatadalpersonalassistent.vercel.app\"\n    }\n  }\n}",
+      "uploadedAt": "2026-06-18T05:37:00.000Z",
+      "size": 680,
+      "charCount": 680
     }
   ]
 }
