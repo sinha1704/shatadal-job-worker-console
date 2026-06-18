@@ -740,8 +740,8 @@ export default function ChatPage() {
                     )}
 
                     {/* Chat Bubble card */}
-                    <div className={`flex flex-col group/msg max-w-[84%] sm:max-w-[76%]`}>
-                      <div className={`px-4 py-3 rounded-2xl shadow-lg relative ${
+                    <div className="flex flex-col group/msg max-w-[84%] sm:max-w-[76%] min-w-0">
+                      <div className={`px-4 py-3 rounded-2xl shadow-lg relative break-words overflow-hidden ${
                         msg.role === 'user'
                           ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-tr-sm shadow-indigo-950/20 border border-indigo-400/15'
                           : 'glass-card text-slate-200 rounded-tl-sm'
@@ -768,11 +768,11 @@ export default function ChatPage() {
                           </div>
                         )}
 
-                        <div className="pr-4">
+                        <div className="pr-4 break-words">
                           {msg.role === 'user' ? (
-                            <p className="whitespace-pre-line text-sm md:text-[15px] leading-relaxed">{msg.content}</p>
+                            <p className="whitespace-pre-line text-sm md:text-[15px] leading-relaxed break-words">{msg.content}</p>
                           ) : (
-                            <div className="prose prose-invert max-w-none">
+                            <div className="prose prose-invert max-w-none break-words">
                               {formatMessageContent(msg.content)}
                               
                               {/* RAG Context badge indicator for premium feel */}
