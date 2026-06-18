@@ -9,6 +9,13 @@ type Message = {
   timestamp: string;
 };
 
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: string;
+};
+
 const SUGGESTIONS = [
   { text: "Who is Shatadal Sundar Sinha?", icon: "👤", category: "About" },
   { text: "Summarize his professional expertise & skills.", icon: "💼", category: "Technical" },
@@ -29,6 +36,8 @@ const staggerClass = (i: number) => {
 export default function ChatPage() {
   const [input, setInput] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>('');
   const [hasLoadedHistory, setHasLoadedHistory] = useState<boolean>(false);
   const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -52,19 +61,41 @@ export default function ChatPage() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load messages from localStorage on mount
+  // Load sessions from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('aetheris_chat_history');
-    if (saved) {
+    const savedSessions = localStorage.getItem('aetheris_chat_sessions');
+    let initialSessions: ChatSession[] = [];
+    let initialActiveId = '';
+    
+    if (savedSessions) {
       try {
-        setMessages(JSON.parse(saved));
+        initialSessions = JSON.parse(savedSessions);
       } catch (e) {
-        console.error("Failed to parse saved chat history:", e);
-        setMessages([{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }]);
+        console.error("Failed to parse saved chat sessions:", e);
       }
-    } else {
-      setMessages([{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }]);
     }
+    
+    if (initialSessions.length === 0) {
+      const defaultSessionId = Date.now().toString();
+      initialSessions = [{
+        id: defaultSessionId,
+        title: "Shatadal AI Agent Chat",
+        messages: [{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }],
+        createdAt: new Date().toISOString()
+      }];
+      initialActiveId = defaultSessionId;
+    } else {
+      initialActiveId = initialSessions[0].id;
+    }
+    
+    setSessions(initialSessions);
+    setActiveSessionId(initialActiveId);
+    
+    const activeSession = initialSessions.find(s => s.id === initialActiveId);
+    if (activeSession) {
+      setMessages(activeSession.messages);
+    }
+    
     setHasLoadedHistory(true);
 
     // Default sidebar to collapsed on smaller desktop screens
@@ -73,12 +104,28 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Save messages to localStorage whenever they change
+  // Save sessions to localStorage whenever they change
   useEffect(() => {
-    if (hasLoadedHistory) {
-      localStorage.setItem('aetheris_chat_history', JSON.stringify(messages));
+    if (hasLoadedHistory && activeSessionId) {
+      setSessions(prevSessions => {
+        const updated = prevSessions.map(s => {
+          if (s.id === activeSessionId) {
+            let title = s.title;
+            if (title === "New Chat" || title === "Shatadal AI Agent Chat") {
+              const firstUserMsg = messages.find(m => m.role === 'user');
+              if (firstUserMsg) {
+                title = firstUserMsg.content.substring(0, 24) + (firstUserMsg.content.length > 24 ? '...' : '');
+              }
+            }
+            return { ...s, messages, title };
+          }
+          return s;
+        });
+        localStorage.setItem('aetheris_chat_sessions', JSON.stringify(updated));
+        return updated;
+      });
     }
-  }, [messages, hasLoadedHistory]);
+  }, [messages, hasLoadedHistory, activeSessionId]);
 
   // Load knowledge base entries on mount
   useEffect(() => {
@@ -154,8 +201,27 @@ export default function ChatPage() {
     }
   };
 
+  const handleSelectSession = (id: string) => {
+    const session = sessions.find(s => s.id === id);
+    if (session) {
+      setActiveSessionId(id);
+      setMessages(session.messages);
+      setIsMobileSidebarOpen(false);
+    }
+  };
+
   const handleNewChat = () => {
-    setMessages([{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }]);
+    const newSessionId = Date.now().toString();
+    const newSession: ChatSession = {
+      id: newSessionId,
+      title: "New Chat",
+      messages: [{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }],
+      createdAt: new Date().toISOString()
+    };
+    
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(newSessionId);
+    setMessages(newSession.messages);
     setInput('');
     setIsLoading(false);
     setApiWarning(null);
@@ -165,10 +231,46 @@ export default function ChatPage() {
     setTimeout(() => textAreaRef.current?.focus(), 150);
   };
 
+  const handleDeleteSession = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    
+    const filtered = sessions.filter(s => s.id !== id);
+    
+    if (filtered.length === 0) {
+      const defaultSessionId = Date.now().toString();
+      const defaultSession: ChatSession = {
+        id: defaultSessionId,
+        title: "Shatadal AI Agent Chat",
+        messages: [{ role: 'ai', content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }],
+        createdAt: new Date().toISOString()
+      };
+      setSessions([defaultSession]);
+      setActiveSessionId(defaultSessionId);
+      setMessages(defaultSession.messages);
+    } else {
+      setSessions(filtered);
+      if (activeSessionId === id) {
+        setActiveSessionId(filtered[0].id);
+        setMessages(filtered[0].messages);
+      }
+    }
+  };
+
   const clearChat = () => setShowClearConfirm(true);
 
   const handleConfirmClear = () => {
-    setMessages([{ role: 'ai', content: "Chat history cleared. How can I assist you now?", timestamp: getTimestamp() }]);
+    const updatedSessions = sessions.map(s => {
+      if (s.id === activeSessionId) {
+        return {
+          ...s,
+          title: "Shatadal AI Agent Chat",
+          messages: [{ role: 'ai' as const, content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }]
+        };
+      }
+      return s;
+    });
+    setSessions(updatedSessions);
+    setMessages([{ role: 'ai' as const, content: "Hello! I am Shatadal's Personal Assistant. How can I assist you today?", timestamp: getTimestamp() }]);
     setShowClearConfirm(false);
     setIsMobileSidebarOpen(false);
     setTimeout(() => {
@@ -414,11 +516,62 @@ export default function ChatPage() {
               <span className="text-[8px] bg-purple-500/10 border border-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded-md font-medium">Node.js</span>
               <span className="text-[8px] bg-amber-500/10 border border-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-md font-medium">TypeScript</span>
             </div>
+            
+            <a
+              href="/resume.pdf"
+              download="Shatadal_Sundar_Sinha_Resume.pdf"
+              className="mt-3 w-full py-1.5 px-3 rounded-xl border border-indigo-500/25 bg-indigo-600/10 hover:bg-indigo-600/25 text-indigo-300 hover:text-white transition-all flex items-center justify-center space-x-2 text-[10px] font-bold cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              <span>Download CV / Resume</span>
+            </a>
           </div>
         </div>
 
         {/* Scrollable middle portion for Files */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Chat Sessions History */}
+          {sessions.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Conversations</span>
+                <span className="text-[9px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-bold">{sessions.length} Threads</span>
+              </div>
+              <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                {sessions.map(s => {
+                  const isActive = s.id === activeSessionId;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => handleSelectSession(s.id)}
+                      className={`group flex items-center justify-between rounded-xl px-3 py-2 cursor-pointer border transition-all ${
+                        isActive
+                          ? 'bg-indigo-600/10 border-indigo-550/20 text-indigo-300 shadow-sm'
+                          : 'bg-slate-950/20 border-slate-900 hover:border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 overflow-hidden pr-2">
+                        <span className="text-xs select-none">💬</span>
+                        <span className="text-[11px] font-semibold truncate leading-normal">{s.title}</span>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteSession(e, s.id)}
+                        className="text-slate-600 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-950/20 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 cursor-pointer"
+                        title="Delete Thread"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">AI Knowledge Base</span>
@@ -474,7 +627,7 @@ export default function ChatPage() {
                         </span>
                       )}
                       <div className="overflow-hidden">
-                        <p className="text-[11px] text-slate-300 font-medium truncate">{entry.filename}</p>
+                        <p className="text-[11px] text-slate-300 font-medium truncate filter blur-[4.5px] hover:blur-0 transition-all duration-300 select-none cursor-help" title="Hover to reveal filename">{entry.filename}</p>
                         <p className="text-[8px] text-slate-500 mt-0.5 truncate uppercase">
                           {entry.type} · {(entry.charCount || 0).toLocaleString()} chars
                         </p>
