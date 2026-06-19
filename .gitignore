@@ -49,3 +49,5 @@ next-env.d.ts
 
 # local automation profiles
 /automation-profile/
+
+.vercel

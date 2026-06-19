@@ -13,7 +13,7 @@ export default function LoginPage() {
   // If already authenticated, redirect directly to dashboard
   useEffect(() => {
     if (localStorage.getItem('isAuthenticated') === 'true') {
-      router.push('/dashboard');
+      router.push('/');
     }
   }, [router]);
 
@@ -25,7 +25,7 @@ export default function LoginPage() {
     setTimeout(() => {
       if (email === 'shatadal17@gmail.com' && password === 'Rupam@172001') {
         localStorage.setItem('isAuthenticated', 'true');
-        router.push('/dashboard');
+        router.push('/');
       } else {
         setError('Invalid email or password. Please try again.');
         setLoading(false);
