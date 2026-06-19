@@ -1121,126 +1121,148 @@ async function runLinkedInFeedScouter(page: any) {
   // Dismiss any blocking modals/popups right away (e.g. premium overlays)
   await dismissLinkedInPostApplyModal(page);
 
-  console.log('[LinkedIn Feed Scouter] Scrolling home feed to load posts...');
-  await updateAgentStatus(page, 'Scrolling Home Feed');
-  for (let s = 0; s < 8; s++) {
-    // Proactively dismiss any modal popup that might have appeared or loaded during scroll
-    await dismissLinkedInPostApplyModal(page);
-    await humanScroll(page, 700);
-    await page.waitForTimeout(1000);
-  }
+  const duration = 10 * 60 * 1000; // 10 minutes in ms
+  const startTime = Date.now();
+  let loopCount = 0;
 
-  console.log('[LinkedIn Feed Scouter] Finding and clicking "see more" buttons...');
-  await updateAgentStatus(page, 'Expanding Feed Posts');
-  const seeMoreButtons = page.locator('button:has-text("see more"), button:has-text("...see more"), button.feed-shared-inline-show-more-text__see-more-less-toggle');
-  const seeMoreCount = await seeMoreButtons.count();
-  for (let i = 0; i < seeMoreCount; i++) {
-    try {
-      const btn = seeMoreButtons.nth(i);
-      if (await btn.isVisible()) {
-        await btn.click({ force: true }).catch(() => {});
-        await page.waitForTimeout(300);
-      }
-    } catch {}
-  }
+  console.log(`[LinkedIn Feed Scouter] Will run continuous scouting for 10 minutes.`);
 
-  const postContainers = page.locator('[data-view-name="feed-full-update"], .feed-shared-update-v2');
-  const postCount = await postContainers.count();
-  console.log(`[LinkedIn Feed Scouter] Found ${postCount} posts on the loaded feed.`);
+  while (Date.now() - startTime < duration) {
+    loopCount++;
+    const minutesLeft = Math.ceil((duration - (Date.now() - startTime)) / 60000);
+    console.log(`[LinkedIn Feed Scouter] Loop #${loopCount} | Time remaining: ~${minutesLeft} minute(s)`);
+    await updateAgentStatus(page, `Scouting Feed (~${minutesLeft}m left)`);
 
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const hiringKeywords = ['hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 'apply to', 'send resume', 'send cv', 'immediate joiner'];
-  const techKeywords = ['react', 'next.js', 'nextjs', 'frontend', 'front-end', 'developer', 'engineer', 'typescript', 'javascript', 'full stack', 'fullstack', 'ui'];
-
-  for (let i = 0; i < postCount; i++) {
-    try {
-      const container = postContainers.nth(i);
-      
-      const textLocators = [
-        '.feed-shared-update-v2__description',
-        '.update-components-text',
-        '.feed-shared-inline-show-more-text',
-        'span.break-words'
-      ];
-      
-      let postText = '';
-      for (const sel of textLocators) {
-        const loc = container.locator(sel);
-        if (await loc.count() > 0) {
-          postText = (await loc.first().textContent() || '').trim();
-          if (postText) break;
-        }
-      }
-
-      if (!postText) continue;
-
-      const postTextLower = postText.toLowerCase();
-
-      const emailsMatched = postText.match(emailRegex);
-      if (!emailsMatched || emailsMatched.length === 0) {
-        continue;
-      }
-
-      const isHiring = hiringKeywords.some(keyword => postTextLower.includes(keyword));
-      const matchesTech = techKeywords.some(keyword => postTextLower.includes(keyword));
-
-      if (isHiring && matchesTech) {
-        const authorNameLoc = container.locator('.update-components-actor__title, .feed-shared-actor__title, .feed-shared-actor__name');
-        const authorName = (await authorNameLoc.count() > 0 ? await authorNameLoc.first().textContent() : '').trim().replace(/\n/g, ' ');
-
-        const authorProfileLoc = container.locator('.update-components-actor__meta-link, .feed-shared-actor__container a, a[href*="/in/"]');
-        const authorProfile = (await authorProfileLoc.count() > 0 ? await authorProfileLoc.first().getAttribute('href') : '').trim();
-
-        const authorHeadlineLoc = container.locator('.update-components-actor__description, .feed-shared-actor__description');
-        const authorHeadline = (await authorHeadlineLoc.count() > 0 ? await authorHeadlineLoc.first().textContent() : '').trim();
-
-        const postTimeLoc = container.locator('.update-components-actor__sub-text, .feed-shared-actor__sub-text');
-        const postTime = (await postTimeLoc.count() > 0 ? await postTimeLoc.first().textContent() : '').trim().replace(/\s+/g, ' ');
-
-        let jobType = 'Full-time';
-        if (postTextLower.includes('remote')) jobType = 'Remote';
-        else if (postTextLower.includes('hybrid')) jobType = 'Hybrid';
-        else if (postTextLower.includes('contract') || postTextLower.includes('freelance')) jobType = 'Contract';
-
-        let location = 'India';
-        const locMatch = postText.match(/location:\s*([a-zA-Z\s,]+)/i) || postText.match(/based in\s*([a-zA-Z\s,]+)/i);
-        if (locMatch) {
-          location = locMatch[1].trim();
-        }
-
-        let companyName = '';
-        const compMatch = authorHeadline.match(/at\s+([A-Za-z0-9\s]+)/i) || postText.match(/company:\s*([a-zA-Z0-9\s]+)/i);
-        if (compMatch) {
-          companyName = compMatch[1].trim();
-        } else {
-          companyName = authorHeadline.split('at')[1]?.trim() || '';
-        }
-
-        let profileUrl = authorProfile;
-        if (profileUrl && !profileUrl.startsWith('http')) {
-          profileUrl = 'https://www.linkedin.com' + profileUrl;
-        }
-
-        for (const email of emailsMatched) {
-          const lead: FeedLead = {
-            email: email.trim().toLowerCase(),
-            postText: postText.substring(0, 1000),
-            authorName: authorName || 'Recruiter',
-            authorProfile: profileUrl || '',
-            companyName: companyName || authorHeadline || 'Hiring Manager',
-            location: location,
-            jobType: jobType,
-            extractedAt: new Date().toISOString(),
-            postTime: postTime || 'Recent'
-          };
-
-          saveFeedLead(lead);
-        }
-      }
-    } catch (e: any) {
-      console.warn(`[LinkedIn Feed Scouter] Error parsing post card at index ${i}: ${e.message}`);
+    // 1. Scroll down a bit to trigger loading more posts
+    console.log('[LinkedIn Feed Scouter] Scrolling home feed to load more posts...');
+    for (let s = 0; s < 4; s++) {
+      await dismissLinkedInPostApplyModal(page);
+      await humanScroll(page, 700);
+      await page.waitForTimeout(800);
     }
+
+    // 2. Dismiss popup modals
+    await dismissLinkedInPostApplyModal(page);
+
+    // 3. Find and click all visible "...see more" buttons to expand post contents
+    console.log('[LinkedIn Feed Scouter] Finding and clicking "see more" buttons...');
+    const seeMoreButtons = page.locator('button:has-text("see more"), button:has-text("...see more"), button.feed-shared-inline-show-more-text__see-more-less-toggle');
+    const seeMoreCount = await seeMoreButtons.count();
+    for (let i = 0; i < seeMoreCount; i++) {
+      try {
+        const btn = seeMoreButtons.nth(i);
+        if (await btn.isVisible()) {
+          await btn.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(200);
+        }
+      } catch {}
+    }
+
+    // 4. Find all feed posts currently loaded in DOM
+    const postContainers = page.locator('[data-view-name="feed-full-update"], .feed-shared-update-v2');
+    const postCount = await postContainers.count();
+    console.log(`[LinkedIn Feed Scouter] Found ${postCount} post containers in current view.`);
+
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const hiringKeywords = ['hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 'apply to', 'send resume', 'send cv', 'immediate joiner'];
+    const techKeywords = ['react', 'next.js', 'nextjs', 'frontend', 'front-end', 'developer', 'engineer', 'typescript', 'javascript', 'full stack', 'fullstack', 'ui'];
+
+    // Evaluate each post
+    for (let i = 0; i < postCount; i++) {
+      try {
+        const container = postContainers.nth(i);
+        
+        const textLocators = [
+          '.feed-shared-update-v2__description',
+          '.update-components-text',
+          '.feed-shared-inline-show-more-text',
+          'span.break-words'
+        ];
+        
+        let postText = '';
+        for (const sel of textLocators) {
+          const loc = container.locator(sel);
+          if (await loc.count() > 0) {
+            postText = (await loc.first().textContent() || '').trim();
+            if (postText) break;
+          }
+        }
+
+        if (!postText) continue;
+
+        const postTextLower = postText.toLowerCase();
+        const emailsMatched = postText.match(emailRegex);
+        if (!emailsMatched || emailsMatched.length === 0) {
+          continue;
+        }
+
+        const isHiring = hiringKeywords.some(keyword => postTextLower.includes(keyword));
+        const matchesTech = techKeywords.some(keyword => postTextLower.includes(keyword));
+
+        if (isHiring && matchesTech) {
+          const authorNameLoc = container.locator('.update-components-actor__title, .feed-shared-actor__title, .feed-shared-actor__name');
+          const authorName = (await authorNameLoc.count() > 0 ? await authorNameLoc.first().textContent() : '').trim().replace(/\n/g, ' ');
+
+          const authorProfileLoc = container.locator('.update-components-actor__meta-link, .feed-shared-actor__container a, a[href*="/in/"]');
+          const authorProfile = (await authorProfileLoc.count() > 0 ? await authorProfileLoc.first().getAttribute('href') : '').trim();
+
+          const authorHeadlineLoc = container.locator('.update-components-actor__description, .feed-shared-actor__description');
+          const authorHeadline = (await authorHeadlineLoc.count() > 0 ? await authorHeadlineLoc.first().textContent() : '').trim();
+
+          const postTimeLoc = container.locator('.update-components-actor__sub-text, .feed-shared-actor__sub-text');
+          const postTime = (await postTimeLoc.count() > 0 ? await postTimeLoc.first().textContent() : '').trim().replace(/\s+/g, ' ');
+
+          let jobType = 'Full-time';
+          if (postTextLower.includes('remote')) jobType = 'Remote';
+          else if (postTextLower.includes('hybrid')) jobType = 'Hybrid';
+          else if (postTextLower.includes('contract') || postTextLower.includes('freelance')) jobType = 'Contract';
+
+          let location = 'India';
+          const locMatch = postText.match(/location:\s*([a-zA-Z\s,]+)/i) || postText.match(/based in\s*([a-zA-Z\s,]+)/i);
+          if (locMatch) {
+            location = locMatch[1].trim();
+          }
+
+          let companyName = '';
+          const compMatch = authorHeadline.match(/at\s+([A-Za-z0-9\s]+)/i) || postText.match(/company:\s*([a-zA-Z0-9\s]+)/i);
+          if (compMatch) {
+            companyName = compMatch[1].trim();
+          } else {
+            companyName = authorHeadline.split('at')[1]?.trim() || '';
+          }
+
+          let profileUrl = authorProfile;
+          if (profileUrl && !profileUrl.startsWith('http')) {
+            profileUrl = 'https://www.linkedin.com' + profileUrl;
+          }
+
+          for (const email of emailsMatched) {
+            const lead: FeedLead = {
+              email: email.trim().toLowerCase(),
+              postText: postText.substring(0, 1000),
+              authorName: authorName || 'Recruiter',
+              authorProfile: profileUrl || '',
+              companyName: companyName || authorHeadline || 'Hiring Manager',
+              location: location,
+              jobType: jobType,
+              extractedAt: new Date().toISOString(),
+              postTime: postTime || 'Recent'
+            };
+
+            saveFeedLead(lead);
+          }
+        }
+      } catch (e: any) {
+        // Suppress individual card errors to avoid flooding console log
+      }
+    }
+
+    // Brief delay between scroll loops
+    await randomDelay(3000, 6000);
   }
+
+  console.log(`[LinkedIn Feed Scouter] Continuous scouting completed successfully after 10 minutes!`);
+  await updateAgentStatus(page, 'Feed Scouting Done');
 }
 
 
