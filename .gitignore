@@ -42,6 +42,8 @@ next-env.d.ts
 
 # local database uploads
 /data/images/
+/data/email_config.json
+/data/automation_stats.json
 
 .vercel
 
