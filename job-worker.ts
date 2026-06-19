@@ -1066,6 +1066,40 @@ function saveFeedLead(lead: FeedLead) {
   }
 }
 
+function extractEmails(text: string): string[] {
+  if (!text) return [];
+  
+  const emails: string[] = [];
+  const standardRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  
+  // Normalize obfuscation and spacing:
+  // e.g. name [at] domain.com, name(at)domain.com, name at domain dot com, name @ domain . com
+  let cleanText = text
+    .replace(/\s*\[\s*at\s*\]\s*/gi, '@')
+    .replace(/\s*\(\s*at\s*\)\s*/gi, '@')
+    .replace(/\s*\{\s*at\s*\}\s*/gi, '@')
+    .replace(/\s*@\s*/g, '@')
+    .replace(/\s*\[\s*dot\s*\]\s*/gi, '.')
+    .replace(/\s*\(\s*dot\s*\)\s*/gi, '.')
+    .replace(/\s*\{\s*dot\s*\}\s*/gi, '.')
+    .replace(/\s*\.\s*/g, '.');
+  
+  cleanText = cleanText.replace(/\s+at\s+/gi, '@');
+  cleanText = cleanText.replace(/\s+dot\s+/gi, '.');
+
+  const matches = cleanText.match(standardRegex);
+  if (matches) {
+    matches.forEach(email => {
+      const normalized = email.trim().toLowerCase();
+      if (!emails.includes(normalized)) {
+        emails.push(normalized);
+      }
+    });
+  }
+  
+  return emails;
+}
+
 async function runLinkedInFeedScouter(page: any) {
   console.log('\n[LinkedIn Feed Scouter] Starting Home Feed scouting...');
   await updateAgentStatus(page, 'Navigating to LinkedIn Feed');
@@ -1163,9 +1197,20 @@ async function runLinkedInFeedScouter(page: any) {
     const postCount = await postContainers.count();
     console.log(`[LinkedIn Feed Scouter] Found ${postCount} post containers in current view.`);
 
-    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    const hiringKeywords = ['hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 'apply to', 'send resume', 'send cv', 'immediate joiner'];
-    const techKeywords = ['react', 'next.js', 'nextjs', 'frontend', 'front-end', 'developer', 'engineer', 'typescript', 'javascript', 'full stack', 'fullstack', 'ui'];
+    const hiringKeywords = [
+      'hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 
+      'apply to', 'send resume', 'send cv', 'immediate joiner', 'share resume', 'share cv', 
+      'send your cv', 'send your resume', 'dm your cv', 'dm resume', 'dm me', 'hiring managers',
+      'hr team', 'hr manager', 'talent acquisition', 'job opportunity', 'open position'
+    ];
+    
+    const techKeywords = [
+      'react', 'next.js', 'nextjs', 'frontend', 'front-end', 'developer', 'engineer', 'typescript', 
+      'javascript', 'full stack', 'fullstack', 'ui', 'angular', 'angularjs', 'backend', 'back-end', 
+      'node', 'node.js', 'nodejs', 'database', 'sql', 'nosql', 'mongodb', 'mysql', 'postgresql',
+      'python', 'django', 'flask', 'java', 'spring', 'php', 'laravel', 'vue', 'vuejs', 'vue.js', 
+      'software', 'programmer', 'coder', 'architect', 'ui/ux', 'web'
+    ];
 
     // Evaluate each post
     for (let i = 0; i < postCount; i++) {
@@ -1188,10 +1233,17 @@ async function runLinkedInFeedScouter(page: any) {
           }
         }
 
+        // Fallback: extract innerText of the entire container if no specific text selector matched
+        if (!postText) {
+          postText = (await container.innerText().catch(() => '')).trim();
+        }
+
         if (!postText) continue;
 
         const postTextLower = postText.toLowerCase();
-        const emailsMatched = postText.match(emailRegex);
+        
+        // Extract emails (including standard and obfuscated ones)
+        const emailsMatched = extractEmails(postText);
         if (!emailsMatched || emailsMatched.length === 0) {
           continue;
         }
