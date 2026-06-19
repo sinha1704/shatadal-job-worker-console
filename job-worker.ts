@@ -1180,36 +1180,88 @@ async function runLinkedInFeedScouter(page: any) {
 
     // 3. Find and click all visible "...see more" buttons to expand post contents
     console.log('[LinkedIn Feed Scouter] Finding and clicking "see more" buttons...');
-    const seeMoreButtons = page.locator('button:has-text("see more"), button:has-text("...see more"), button.feed-shared-inline-show-more-text__see-more-less-toggle');
-    const seeMoreCount = await seeMoreButtons.count();
+    const seeMoreButtons = page.locator([
+      'button:has-text("see more")',
+      'button:has-text("...see more")',
+      'button.feed-shared-inline-show-more-text__see-more-less-toggle',
+      'button[class*="see-more"]',
+      'button[class*="show-more"]'
+    ].join(', '));
+    
+    const seeMoreCount = await seeMoreButtons.count().catch(() => 0);
+    console.log(`[LinkedIn Feed Scouter] Found ${seeMoreCount} "see more" buttons.`);
     for (let i = 0; i < seeMoreCount; i++) {
       try {
         const btn = seeMoreButtons.nth(i);
         if (await btn.isVisible()) {
           await btn.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(200);
+          await page.waitForTimeout(250);
         }
       } catch {}
     }
 
     // 4. Find all feed posts currently loaded in DOM
-    const postContainers = page.locator('[data-view-name="feed-full-update"], .feed-shared-update-v2');
-    const postCount = await postContainers.count();
+    const postContainers = page.locator([
+      '.scaffold-layout__list-container > *',
+      'div[data-urn]',
+      'div[data-activity-id]',
+      'div.feed-shared-update-v2',
+      'div[class*="feed-shared-update"]',
+      'div[class*="update-v2"]',
+      'div[data-view-name*="feed"]',
+      'div[data-view-name*="update"]',
+      'article'
+    ].join(', '));
+    
+    const postCount = await postContainers.count().catch(() => 0);
     console.log(`[LinkedIn Feed Scouter] Found ${postCount} post containers in current view.`);
+
+    // Log DOM Diagnostics to troubleshoot selector changes dynamically
+    if (postCount === 0) {
+      try {
+        const domDiags = await page.evaluate(() => {
+          const out: string[] = [];
+          const list = document.querySelector('.scaffold-layout__list-container');
+          out.push(`scaffold container: ${list ? 'Present' : 'Not Found'}`);
+          if (list) {
+            out.push(`scaffold children count: ${list.children.length}`);
+            for (let k = 0; k < Math.min(list.children.length, 3); k++) {
+              const child = list.children[k] as HTMLElement;
+              out.push(`  Child #${k}: tag=${child.tagName}, class="${child.className}", id="${child.id}", urn="${child.getAttribute('data-urn') || ''}"`);
+            }
+          }
+          const articles = document.querySelectorAll('article');
+          out.push(`articles count: ${articles.length}`);
+          const anyDivsWithUrn = document.querySelectorAll('div[data-urn]');
+          out.push(`div[data-urn] count: ${anyDivsWithUrn.length}`);
+          const updates = document.querySelectorAll('[class*="update-v2"]');
+          out.push(`class*="update-v2" count: ${updates.length}`);
+          const feedShared = document.querySelectorAll('[class*="feed-shared-update"]');
+          out.push(`class*="feed-shared-update" count: ${feedShared.length}`);
+          return out;
+        });
+        console.log(`[LinkedIn Feed Scouter] DOM diagnostics when 0 posts found:\n  ${domDiags.join('\n  ')}`);
+      } catch (err: any) {
+        console.log(`[LinkedIn Feed Scouter] DOM diagnostics error: ${err.message}`);
+      }
+    }
 
     const hiringKeywords = [
       'hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 
       'apply to', 'send resume', 'send cv', 'immediate joiner', 'share resume', 'share cv', 
       'send your cv', 'send your resume', 'dm your cv', 'dm resume', 'dm me', 'hiring managers',
-      'hr team', 'hr manager', 'talent acquisition', 'job opportunity', 'open position'
+      'hr team', 'hr manager', 'talent acquisition', 'job opportunity', 'open position',
+      'email me', 'reach out', 'write to', 'jobs', 'grow our team', 'team is growing', 'career opportunity',
+      'opportunity', 'opportunities', 'join us', 'work with us', 'roles', 'openings', 'recruiter', 'hr'
     ];
     
     const techKeywords = [
-      'react', 'next.js', 'nextjs', 'frontend', 'front-end', 'developer', 'engineer', 'typescript', 
-      'javascript', 'full stack', 'fullstack', 'ui', 'angular', 'angularjs', 'backend', 'back-end', 
-      'node', 'node.js', 'nodejs', 'database', 'sql', 'nosql', 'mongodb', 'mysql', 'postgresql',
-      'python', 'django', 'flask', 'java', 'spring', 'php', 'laravel', 'vue', 'vuejs', 'vue.js', 
-      'software', 'programmer', 'coder', 'architect', 'ui/ux', 'web'
+      'react', 'react.js', 'reactjs', 'next.js', 'nextjs', 'angular', 'angularjs', 'typescript', 
+      'javascript', 'js', 'frontend', 'front-end', 'developer', 'engineer', 'full stack', 'fullstack', 
+      'ui', 'backend', 'back-end', 'node', 'node.js', 'nodejs', 'express', 'express.js', 'ejs', 
+      'rest api', 'mongodb', 'mongoose', 'html', 'html5', 'css', 'css3', 'sass', 'scss', 
+      'bootstrap', 'tailwind', 'material ui', 'mui', 'ant design', 'razorpay', 'cashfree', 
+      'instamojo', 'ai agent', 'chatbot', 'browser-automation', 'web'
     ];
 
     // Evaluate each post
@@ -1217,11 +1269,29 @@ async function runLinkedInFeedScouter(page: any) {
       try {
         const container = postContainers.nth(i);
         
+        // Extract author name first to use in logs
+        const authorNameLoc = container.locator([
+          '.update-components-actor__title',
+          '.feed-shared-actor__title',
+          '.feed-shared-actor__name',
+          '[class*="actor__title"]',
+          '[class*="actor__name"]',
+          '[class*="-actor__title"]',
+          '[class*="-actor__name"]'
+        ].join(', '));
+        const authorName = (await authorNameLoc.count() > 0 ? await authorNameLoc.first().textContent() : '').trim().replace(/\n/g, ' ') || `Author #${i + 1}`;
+
+        console.log(`[LinkedIn Feed Scouter] Evaluating post #${i + 1}/${postCount} by "${authorName}"...`);
+
         const textLocators = [
           '.feed-shared-update-v2__description',
           '.update-components-text',
           '.feed-shared-inline-show-more-text',
-          'span.break-words'
+          'span.break-words',
+          '[class*="update-v2__description"]',
+          '[class*="inline-show-more-text"]',
+          '[class*="feed-shared-text"]',
+          '[class*="update-components-text"]'
         ];
         
         let postText = '';
@@ -1238,30 +1308,55 @@ async function runLinkedInFeedScouter(page: any) {
           postText = (await container.innerText().catch(() => '')).trim();
         }
 
-        if (!postText) continue;
+        if (!postText) {
+          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" has no text content. Skipping.`);
+          continue;
+        }
 
         const postTextLower = postText.toLowerCase();
         
         // Extract emails (including standard and obfuscated ones)
         const emailsMatched = extractEmails(postText);
         if (!emailsMatched || emailsMatched.length === 0) {
+          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" has no email addresses. Skipping.`);
           continue;
         }
 
-        const isHiring = hiringKeywords.some(keyword => postTextLower.includes(keyword));
-        const matchesTech = techKeywords.some(keyword => postTextLower.includes(keyword));
+        console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" contains email(s): ${emailsMatched.join(', ')}. Checking keywords...`);
+
+        const matchedHiring = hiringKeywords.filter(keyword => postTextLower.includes(keyword));
+        const matchedTech = techKeywords.filter(keyword => postTextLower.includes(keyword));
+
+        const isHiring = matchedHiring.length > 0 || emailsMatched.some(e => e.includes('hr') || e.includes('career') || e.includes('job') || e.includes('hire') || e.includes('recruit') || e.includes('talent'));
+        const matchesTech = matchedTech.length > 0;
 
         if (isHiring && matchesTech) {
-          const authorNameLoc = container.locator('.update-components-actor__title, .feed-shared-actor__title, .feed-shared-actor__name');
-          const authorName = (await authorNameLoc.count() > 0 ? await authorNameLoc.first().textContent() : '').trim().replace(/\n/g, ' ');
-
-          const authorProfileLoc = container.locator('.update-components-actor__meta-link, .feed-shared-actor__container a, a[href*="/in/"]');
+          console.log(`[LinkedIn Feed Scouter] ✅ Post #${i + 1} matched! (Hiring: ${matchedHiring.join(', ')} | Tech: ${matchedTech.join(', ')})`);
+          
+          const authorProfileLoc = container.locator([
+            '.update-components-actor__meta-link',
+            '.feed-shared-actor__container a',
+            'a[href*="/in/"]',
+            'a[href*="/company/"]',
+            '[class*="actor__meta-link"]',
+            '[class*="actor__title-link"]'
+          ].join(', '));
           const authorProfile = (await authorProfileLoc.count() > 0 ? await authorProfileLoc.first().getAttribute('href') : '').trim();
 
-          const authorHeadlineLoc = container.locator('.update-components-actor__description, .feed-shared-actor__description');
+          const authorHeadlineLoc = container.locator([
+            '.update-components-actor__description',
+            '.feed-shared-actor__description',
+            '[class*="actor__description"]',
+            '[class*="-actor__description"]'
+          ].join(', '));
           const authorHeadline = (await authorHeadlineLoc.count() > 0 ? await authorHeadlineLoc.first().textContent() : '').trim();
 
-          const postTimeLoc = container.locator('.update-components-actor__sub-text, .feed-shared-actor__sub-text');
+          const postTimeLoc = container.locator([
+            '.update-components-actor__sub-text',
+            '.feed-shared-actor__sub-text',
+            '[class*="actor__sub-text"]',
+            '[class*="-actor__sub-text"]'
+          ].join(', '));
           const postTime = (await postTimeLoc.count() > 0 ? await postTimeLoc.first().textContent() : '').trim().replace(/\s+/g, ' ');
 
           let jobType = 'Full-time';
@@ -1303,9 +1398,11 @@ async function runLinkedInFeedScouter(page: any) {
 
             saveFeedLead(lead);
           }
+        } else {
+          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" does not match criteria. (Hiring: ${isHiring ? 'Yes' : 'No'} | Tech: ${matchesTech ? 'Yes' : 'No'}). Skipping.`);
         }
       } catch (e: any) {
-        // Suppress individual card errors to avoid flooding console log
+        // Suppress individual card errors
       }
     }
 
