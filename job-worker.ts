@@ -802,7 +802,27 @@ const humanScroll = async (page: any, scrollDistance = 400) => {
       unlock(document.querySelector('.scaffold-layout'));
       unlock(document.querySelector('.scaffold-layout__inner'));
       unlock(document.querySelector('.authentication-outlet'));
+
+      // Unlock all large layout divs that might have overflow hidden or scroll locks
+      const allDivs = document.querySelectorAll('div');
+      allDivs.forEach(div => {
+        const style = window.getComputedStyle(div);
+        if (style.overflow === 'hidden' || style.overflowY === 'hidden') {
+          if (div.offsetHeight > 300) {
+            div.style.setProperty('overflow', 'auto', 'important');
+            div.style.setProperty('overflow-y', 'auto', 'important');
+          }
+        }
+      });
     }).catch(() => {});
+
+    // Focus main container area to ensure keyboard PageDown / ArrowDown scrolls the actual feed
+    try {
+      const mainEl = page.locator('#main, main, .scaffold-layout__main, .feed-shared-update-v2').first();
+      if (await mainEl.count() > 0 && await mainEl.isVisible()) {
+        await mainEl.focus().catch(() => {});
+      }
+    } catch {}
 
     // 2. Try JavaScript scrolling (window + scrollingElement)
     await page.evaluate((dist: number) => {
