@@ -250,12 +250,16 @@ export default function DashboardPage() {
   const [credentials, setCredentials] = useState({
     linkedinEmail: '',
     linkedinPassword: '',
+    linkedinUseGoogle: false,
     indeedEmail: '',
     indeedPassword: '',
+    indeedUseGoogle: false,
     naukriEmail: '',
     naukriPassword: '',
+    naukriUseGoogle: false,
     instahyreEmail: '',
-    instahyrePassword: ''
+    instahyrePassword: '',
+    instahyreUseGoogle: false
   });
 
   // Profile configuration states to present in settings panel
@@ -346,12 +350,16 @@ export default function DashboardPage() {
           setCredentials({
             linkedinEmail: data.linkedinEmail || '',
             linkedinPassword: data.linkedinPassword || '',
+            linkedinUseGoogle: data.linkedinUseGoogle || false,
             indeedEmail: data.indeedEmail || '',
             indeedPassword: data.indeedPassword || '',
+            indeedUseGoogle: data.indeedUseGoogle || false,
             naukriEmail: data.naukriEmail || '',
             naukriPassword: data.naukriPassword || '',
+            naukriUseGoogle: data.naukriUseGoogle || false,
             instahyreEmail: data.instahyreEmail || '',
-            instahyrePassword: data.instahyrePassword || ''
+            instahyrePassword: data.instahyrePassword || '',
+            instahyreUseGoogle: data.instahyreUseGoogle || false
           });
         }
       } catch (err) {
@@ -1243,7 +1251,18 @@ export default function DashboardPage() {
                 <form onSubmit={handleSaveCredentials} className="space-y-3.5 text-xs">
                   {/* LinkedIn */}
                   <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-indigo-400 block">LinkedIn Login</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-indigo-400 block">LinkedIn Login</span>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={credentials.linkedinUseGoogle}
+                          onChange={(e) => setCredentials({ ...credentials, linkedinUseGoogle: e.target.checked })}
+                          className="w-3 h-3 text-indigo-650 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer"
+                        />
+                        Use Google SSO
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={credentials.linkedinEmail}
@@ -1253,16 +1272,28 @@ export default function DashboardPage() {
                     />
                     <input
                       type="password"
-                      value={credentials.linkedinPassword}
+                      value={credentials.linkedinUseGoogle ? '' : credentials.linkedinPassword}
                       onChange={(e) => setCredentials({ ...credentials, linkedinPassword: e.target.value })}
-                      placeholder="Password"
-                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                      placeholder={credentials.linkedinUseGoogle ? 'Bypassed via Google SSO' : 'Password'}
+                      disabled={credentials.linkedinUseGoogle}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650 disabled:opacity-50 disabled:bg-slate-950/30"
                     />
                   </div>
 
                   {/* Indeed */}
                   <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
-                    <span className="text-[10px] font-bold text-indigo-400 block">Indeed Login</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-indigo-400 block">Indeed Login</span>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={credentials.indeedUseGoogle}
+                          onChange={(e) => setCredentials({ ...credentials, indeedUseGoogle: e.target.checked })}
+                          className="w-3 h-3 text-indigo-650 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer"
+                        />
+                        Use Google SSO
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={credentials.indeedEmail}
@@ -1272,16 +1303,28 @@ export default function DashboardPage() {
                     />
                     <input
                       type="password"
-                      value={credentials.indeedPassword}
+                      value={credentials.indeedUseGoogle ? '' : credentials.indeedPassword}
                       onChange={(e) => setCredentials({ ...credentials, indeedPassword: e.target.value })}
-                      placeholder="Password"
-                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                      placeholder={credentials.indeedUseGoogle ? 'Bypassed via Google SSO' : 'Password'}
+                      disabled={credentials.indeedUseGoogle}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650 disabled:opacity-50 disabled:bg-slate-950/30"
                     />
                   </div>
 
                   {/* Naukri */}
                   <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
-                    <span className="text-[10px] font-bold text-indigo-400 block">Naukri Login</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-indigo-400 block">Naukri Login</span>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={credentials.naukriUseGoogle}
+                          onChange={(e) => setCredentials({ ...credentials, naukriUseGoogle: e.target.checked })}
+                          className="w-3 h-3 text-indigo-650 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer"
+                        />
+                        Use Google SSO
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={credentials.naukriEmail}
@@ -1291,29 +1334,42 @@ export default function DashboardPage() {
                     />
                     <input
                       type="password"
-                      value={credentials.naukriPassword}
+                      value={credentials.naukriUseGoogle ? '' : credentials.naukriPassword}
                       onChange={(e) => setCredentials({ ...credentials, naukriPassword: e.target.value })}
-                      placeholder="Password"
-                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                      placeholder={credentials.naukriUseGoogle ? 'Bypassed via Google SSO' : 'Password'}
+                      disabled={credentials.naukriUseGoogle}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650 disabled:opacity-50 disabled:bg-slate-950/30"
                     />
                   </div>
 
                   {/* Instahyre */}
                   <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
-                    <span className="text-[10px] font-bold text-indigo-400 block">Instahyre Login</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-indigo-400 block">Instahyre Login</span>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={credentials.instahyreUseGoogle}
+                          onChange={(e) => setCredentials({ ...credentials, instahyreUseGoogle: e.target.checked })}
+                          className="w-3 h-3 text-indigo-650 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 cursor-pointer"
+                        />
+                        Use Google SSO
+                      </label>
+                    </div>
                     <input
                       type="text"
                       value={credentials.instahyreEmail}
                       onChange={(e) => setCredentials({ ...credentials, instahyreEmail: e.target.value })}
                       placeholder="Email Address"
-                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-555 outline-none placeholder:text-slate-650"
                     />
                     <input
                       type="password"
-                      value={credentials.instahyrePassword}
+                      value={credentials.instahyreUseGoogle ? '' : credentials.instahyrePassword}
                       onChange={(e) => setCredentials({ ...credentials, instahyrePassword: e.target.value })}
-                      placeholder="Password"
-                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                      placeholder={credentials.instahyreUseGoogle ? 'Bypassed via Google SSO' : 'Password'}
+                      disabled={credentials.instahyreUseGoogle}
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-555 outline-none placeholder:text-slate-650 disabled:opacity-50 disabled:bg-slate-950/30"
                     />
                   </div>
 

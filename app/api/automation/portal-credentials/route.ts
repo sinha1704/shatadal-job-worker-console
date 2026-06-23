@@ -22,12 +22,16 @@ function loadConfig() {
   return {
     linkedinEmail: '',
     linkedinPassword: '',
+    linkedinUseGoogle: false,
     indeedEmail: '',
     indeedPassword: '',
+    indeedUseGoogle: false,
     naukriEmail: '',
     naukriPassword: '',
+    naukriUseGoogle: false,
     instahyreEmail: '',
-    instahyrePassword: ''
+    instahyrePassword: '',
+    instahyreUseGoogle: false
   };
 }
 
@@ -43,12 +47,16 @@ export async function GET() {
     const safeConfig = {
       linkedinEmail: config.linkedinEmail || '',
       linkedinPassword: config.linkedinPassword ? '••••••••' : '',
+      linkedinUseGoogle: !!config.linkedinUseGoogle,
       indeedEmail: config.indeedEmail || '',
       indeedPassword: config.indeedPassword ? '••••••••' : '',
+      indeedUseGoogle: !!config.indeedUseGoogle,
       naukriEmail: config.naukriEmail || '',
       naukriPassword: config.naukriPassword ? '••••••••' : '',
+      naukriUseGoogle: !!config.naukriUseGoogle,
       instahyreEmail: config.instahyreEmail || '',
-      instahyrePassword: config.instahyrePassword ? '••••••••' : ''
+      instahyrePassword: config.instahyrePassword ? '••••••••' : '',
+      instahyreUseGoogle: !!config.instahyreUseGoogle
     };
     
     return NextResponse.json(safeConfig);
@@ -85,12 +93,16 @@ export async function POST(request: Request) {
     const updatedConfig = {
       linkedinEmail: body.linkedinEmail || '',
       linkedinPassword,
+      linkedinUseGoogle: !!body.linkedinUseGoogle,
       indeedEmail: body.indeedEmail || '',
       indeedPassword,
+      indeedUseGoogle: !!body.indeedUseGoogle,
       naukriEmail: body.naukriEmail || '',
       naukriPassword,
+      naukriUseGoogle: !!body.naukriUseGoogle,
       instahyreEmail: body.instahyreEmail || '',
-      instahyrePassword
+      instahyrePassword,
+      instahyreUseGoogle: !!body.instahyreUseGoogle
     };
 
     saveConfig(updatedConfig);

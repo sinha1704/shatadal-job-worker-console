@@ -874,46 +874,157 @@ function getPortalCredentials() {
   return {
     linkedinEmail: '',
     linkedinPassword: '',
+    linkedinUseGoogle: false,
     indeedEmail: '',
     indeedPassword: '',
+    indeedUseGoogle: false,
     naukriEmail: '',
     naukriPassword: '',
+    naukriUseGoogle: false,
     instahyreEmail: '',
-    instahyrePassword: ''
+    instahyrePassword: '',
+    instahyreUseGoogle: false
   };
+}
+
+async function handleGoogleAccountChooser(targetPage: any): Promise<boolean> {
+  try {
+    const url = targetPage.url();
+    if (url.includes('accounts.google.com')) {
+      console.log('[Google SSO] Detected Google Accounts page. Solving chooser...');
+      await targetPage.waitForTimeout(1500);
+      
+      // Look for shatadal17@gmail.com
+      const emailSelector = targetPage.locator('[data-email="shatadal17@gmail.com"], [data-identifier="shatadal17@gmail.com"], div:has-text("shatadal17@gmail.com")');
+      const count = await emailSelector.count();
+      if (count > 0) {
+        console.log('[Google SSO] Found shatadal17@gmail.com account card. Clicking it...');
+        await humanClick(targetPage, emailSelector.first());
+        await targetPage.waitForTimeout(2000);
+        return true;
+      }
+      
+      // Fallback: look for any elements containing the email text
+      const textSelector = targetPage.locator('text=shatadal17@gmail.com');
+      if (await textSelector.count() > 0) {
+        console.log('[Google SSO] Found shatadal17@gmail.com text. Clicking...');
+        await humanClick(targetPage, textSelector.first());
+        await targetPage.waitForTimeout(2000);
+        return true;
+      }
+
+      // If the email is already filled and it's asking to click "Next" or "Continue"
+      const nextBtn = targetPage.locator('button:has-text("Next"), button:has-text("Continue"), #submit_approve_button');
+      if (await nextBtn.count() > 0) {
+        console.log('[Google SSO] Found Next/Continue button on Google login. Clicking...');
+        await humanClick(targetPage, nextBtn.first());
+        await targetPage.waitForTimeout(2000);
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Google SSO] Error in handleGoogleAccountChooser: ${err.message}`);
+  }
+  return false;
+}
+
+async function clickGoogleSSOAndAuthorize(page: any, googleButtonLocator: any): Promise<boolean> {
+  const context = page.context();
+  
+  // Set up listener for popup if it opens in a new tab/window
+  let popupPage: any = null;
+  const popupPromise = context.waitForEvent('page', { timeout: 8000 }).then((p: any) => {
+    popupPage = p;
+    return p;
+  }).catch(() => null);
+
+  console.log('[Google SSO] Clicking the Google SSO button...');
+  await humanClick(page, googleButtonLocator);
+  
+  // Wait up to 3 seconds for either popup or redirect
+  await page.waitForTimeout(3000);
+  
+  // Case 1: Popup was opened
+  const popup = await popupPromise;
+  if (popup) {
+    console.log('[Google SSO] Google login popup detected!');
+    await popup.waitForLoadState('domcontentloaded').catch(() => {});
+    await handleGoogleAccountChooser(popup);
+    
+    // Wait for popup to close automatically or navigate back
+    for (let i = 0; i < 15; i++) {
+      if (popup.isClosed()) {
+        console.log('[Google SSO] Google login popup closed.');
+        break;
+      }
+      // Just in case it needs another click (e.g. approve/confirm)
+      await handleGoogleAccountChooser(popup);
+      await page.waitForTimeout(1000);
+    }
+    return true;
+  }
+  
+  // Case 2: Redirection occurred in main page
+  await handleGoogleAccountChooser(page);
+  
+  // Just in case, scan all pages in context
+  const allPages = context.pages();
+  for (const p of allPages) {
+    if (p !== page && !p.isClosed() && p.url().includes('accounts.google.com')) {
+      console.log('[Google SSO] Found Google Account chooser page in another tab.');
+      await handleGoogleAccountChooser(p);
+    }
+  }
+
+  return true;
 }
 
 async function attemptLinkedInLogin(page: any): Promise<boolean> {
   const creds = getPortalCredentials();
-  if (!creds.linkedinEmail || !creds.linkedinPassword) {
+  const useGoogle = !!creds.linkedinUseGoogle;
+  if (!creds.linkedinEmail && !useGoogle) {
     console.log('[LinkedIn Auto-Login] No saved credentials found in vault. Cannot auto-login.');
     return false;
   }
-  console.log('[LinkedIn Auto-Login] Attempting automated login...');
+  console.log(`[LinkedIn Auto-Login] Attempting login (Google SSO: ${useGoogle})...`);
   try {
     await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded' });
     await randomDelay(800, 1500);
 
     if (await isLinkedInLoggedIn(page)) return true;
 
-    const usernameInput = page.locator('#username');
-    const passwordInput = page.locator('#password');
-    const submitBtn = page.locator('button[type="submit"]');
+    if (useGoogle) {
+      const googleBtn = page.locator('button[data-id="sign-in-with-google-button"], button:has-text("Continue with Google"), button:has-text("Sign in with Google")').first();
+      if (await googleBtn.count() > 0) {
+        await clickGoogleSSOAndAuthorize(page, googleBtn);
+        await randomDelay(3000, 5000);
+        if (await isLinkedInLoggedIn(page)) {
+          console.log('[LinkedIn Auto-Login] Google SSO login succeeded!');
+          return true;
+        }
+      } else {
+        console.warn('[LinkedIn Auto-Login] Google SSO button not found on LinkedIn page.');
+      }
+    } else {
+      const usernameInput = page.locator('#username');
+      const passwordInput = page.locator('#password');
+      const submitBtn = page.locator('button[type="submit"]');
 
-    if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
-      await humanFill(page, usernameInput, creds.linkedinEmail);
-      await randomDelay(300, 600);
-      await humanFill(page, passwordInput, creds.linkedinPassword);
-      await randomDelay(500, 1000);
-      
-      await updateAgentStatus(page, 'Logging In');
-      await humanClick(page, submitBtn);
-      await randomDelay(3000, 5000);
+      if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
+        await humanFill(page, usernameInput, creds.linkedinEmail);
+        await randomDelay(300, 600);
+        await humanFill(page, passwordInput, creds.linkedinPassword);
+        await randomDelay(500, 1000);
+        
+        await updateAgentStatus(page, 'Logging In');
+        await humanClick(page, submitBtn);
+        await randomDelay(3000, 5000);
 
-      const success = await isLinkedInLoggedIn(page);
-      if (success) {
-        console.log('[LinkedIn Auto-Login] Automated login succeeded!');
-        return true;
+        const success = await isLinkedInLoggedIn(page);
+        if (success) {
+          console.log('[LinkedIn Auto-Login] Automated login succeeded!');
+          return true;
+        }
       }
     }
   } catch (err: any) {
@@ -924,35 +1035,50 @@ async function attemptLinkedInLogin(page: any): Promise<boolean> {
 
 async function attemptInstahyreLogin(page: any): Promise<boolean> {
   const creds = getPortalCredentials();
-  if (!creds.instahyreEmail || !creds.instahyrePassword) {
+  const useGoogle = !!creds.instahyreUseGoogle;
+  if (!creds.instahyreEmail && !useGoogle) {
     console.log('[Instahyre Auto-Login] No saved credentials found in vault. Cannot auto-login.');
     return false;
   }
-  console.log('[Instahyre Auto-Login] Attempting automated login...');
+  console.log(`[Instahyre Auto-Login] Attempting login (Google SSO: ${useGoogle})...`);
   try {
     await page.goto('https://www.instahyre.com/login/', { waitUntil: 'domcontentloaded' });
     await randomDelay(800, 1500);
 
     if (await isInstahyreLoggedIn(page)) return true;
 
-    const emailInput = page.locator('#email');
-    const passwordInput = page.locator('#password');
-    const submitBtn = page.locator('button[type="submit"]');
+    if (useGoogle) {
+      const googleBtn = page.locator('a[href*="google"], button:has-text("Google"), a:has-text("Google"), button:has-text("Sign in with Google")').first();
+      if (await googleBtn.count() > 0) {
+        await clickGoogleSSOAndAuthorize(page, googleBtn);
+        await randomDelay(3000, 5000);
+        if (await isInstahyreLoggedIn(page)) {
+          console.log('[Instahyre Auto-Login] Google SSO login succeeded!');
+          return true;
+        }
+      } else {
+        console.warn('[Instahyre Auto-Login] Google SSO button not found on Instahyre page.');
+      }
+    } else {
+      const emailInput = page.locator('#email');
+      const passwordInput = page.locator('#password');
+      const submitBtn = page.locator('button[type="submit"]');
 
-    if (await emailInput.count() > 0 && await passwordInput.count() > 0) {
-      await humanFill(page, emailInput, creds.instahyreEmail);
-      await randomDelay(300, 600);
-      await humanFill(page, passwordInput, creds.instahyrePassword);
-      await randomDelay(500, 1000);
+      if (await emailInput.count() > 0 && await passwordInput.count() > 0) {
+        await humanFill(page, emailInput, creds.instahyreEmail);
+        await randomDelay(300, 600);
+        await humanFill(page, passwordInput, creds.instahyrePassword);
+        await randomDelay(500, 1000);
 
-      await updateAgentStatus(page, 'Logging In');
-      await humanClick(page, submitBtn);
-      await randomDelay(3000, 5000);
+        await updateAgentStatus(page, 'Logging In');
+        await humanClick(page, submitBtn);
+        await randomDelay(3000, 5000);
 
-      const success = await isInstahyreLoggedIn(page);
-      if (success) {
-        console.log('[Instahyre Auto-Login] Automated login succeeded!');
-        return true;
+        const success = await isInstahyreLoggedIn(page);
+        if (success) {
+          console.log('[Instahyre Auto-Login] Automated login succeeded!');
+          return true;
+        }
       }
     }
   } catch (err: any) {
@@ -963,38 +1089,53 @@ async function attemptInstahyreLogin(page: any): Promise<boolean> {
 
 async function attemptIndeedLogin(page: any): Promise<boolean> {
   const creds = getPortalCredentials();
-  if (!creds.indeedEmail || !creds.indeedPassword) {
+  const useGoogle = !!creds.indeedUseGoogle;
+  if (!creds.indeedEmail && !useGoogle) {
     console.log('[Indeed Auto-Login] No saved credentials found in vault. Cannot auto-login.');
     return false;
   }
-  console.log('[Indeed Auto-Login] Attempting automated login...');
+  console.log(`[Indeed Auto-Login] Attempting login (Google SSO: ${useGoogle})...`);
   try {
     await page.goto('https://secure.indeed.com/auth', { waitUntil: 'domcontentloaded' });
     await randomDelay(800, 1500);
 
     if (await isIndeedLoggedIn(page)) return true;
 
-    const emailInput = page.locator('input[type="email"], input[name="email"], #ifl-InputFormField-3').first();
-    if (await emailInput.count() > 0) {
-      await humanFill(page, emailInput, creds.indeedEmail);
-      await randomDelay(500, 1000);
-      
-      const nextBtn = page.locator('button[type="submit"], button:has-text("Continue")').first();
-      await humanClick(page, nextBtn);
-      await randomDelay(1500, 2500);
-
-      const passwordInput = page.locator('input[type="password"], input[name="password"]').first();
-      if (await passwordInput.count() > 0) {
-        await humanFill(page, passwordInput, creds.indeedPassword);
+    if (useGoogle) {
+      const googleBtn = page.locator('button[data-testid="google-button"], button:has-text("Continue with Google"), button:has-text("Sign in with Google")').first();
+      if (await googleBtn.count() > 0) {
+        await clickGoogleSSOAndAuthorize(page, googleBtn);
+        await randomDelay(3000, 5000);
+        if (await isIndeedLoggedIn(page)) {
+          console.log('[Indeed Auto-Login] Google SSO login succeeded!');
+          return true;
+        }
+      } else {
+        console.warn('[Indeed Auto-Login] Google SSO button not found on Indeed page.');
+      }
+    } else {
+      const emailInput = page.locator('input[type="email"], input[name="email"], #ifl-InputFormField-3').first();
+      if (await emailInput.count() > 0) {
+        await humanFill(page, emailInput, creds.indeedEmail);
         await randomDelay(500, 1000);
         
-        const signInBtn = page.locator('button[type="submit"], button:has-text("Sign in")').first();
-        await humanClick(page, signInBtn);
-        await randomDelay(3000, 5000);
+        const nextBtn = page.locator('button[type="submit"], button:has-text("Continue")').first();
+        await humanClick(page, nextBtn);
+        await randomDelay(1500, 2500);
 
-        if (await isIndeedLoggedIn(page)) {
-          console.log('[Indeed Auto-Login] Automated login succeeded!');
-          return true;
+        const passwordInput = page.locator('input[type="password"], input[name="password"]').first();
+        if (await passwordInput.count() > 0) {
+          await humanFill(page, passwordInput, creds.indeedPassword);
+          await randomDelay(500, 1000);
+          
+          const signInBtn = page.locator('button[type="submit"], button:has-text("Sign in")').first();
+          await humanClick(page, signInBtn);
+          await randomDelay(3000, 5000);
+
+          if (await isIndeedLoggedIn(page)) {
+            console.log('[Indeed Auto-Login] Automated login succeeded!');
+            return true;
+          }
         }
       }
     }
@@ -1006,35 +1147,50 @@ async function attemptIndeedLogin(page: any): Promise<boolean> {
 
 async function attemptNaukriLogin(page: any): Promise<boolean> {
   const creds = getPortalCredentials();
-  if (!creds.naukriEmail || !creds.naukriPassword) {
+  const useGoogle = !!creds.naukriUseGoogle;
+  if (!creds.naukriEmail && !useGoogle) {
     console.log('[Naukri Auto-Login] No saved credentials found in vault. Cannot auto-login.');
     return false;
   }
-  console.log('[Naukri Auto-Login] Attempting automated login...');
+  console.log(`[Naukri Auto-Login] Attempting login (Google SSO: ${useGoogle})...`);
   try {
     await page.goto('https://www.naukri.com/nlogin/login', { waitUntil: 'domcontentloaded' });
     await randomDelay(800, 1500);
 
     if (await isNaukriLoggedIn(page)) return true;
 
-    const usernameInput = page.locator('#usernameField');
-    const passwordInput = page.locator('#passwordField');
-    const submitBtn = page.locator('button[type="submit"]');
+    if (useGoogle) {
+      const googleBtn = page.locator('.googleBtn, button:has-text("Sign in with Google"), button:has-text("Google"), span:has-text("Google")').first();
+      if (await googleBtn.count() > 0) {
+        await clickGoogleSSOAndAuthorize(page, googleBtn);
+        await randomDelay(3000, 5000);
+        if (await isNaukriLoggedIn(page)) {
+          console.log('[Naukri Auto-Login] Google SSO login succeeded!');
+          return true;
+        }
+      } else {
+        console.warn('[Naukri Auto-Login] Google SSO button not found on Naukri page.');
+      }
+    } else {
+      const usernameInput = page.locator('#usernameField');
+      const passwordInput = page.locator('#passwordField');
+      const submitBtn = page.locator('button[type="submit"]');
 
-    if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
-      await humanFill(page, usernameInput, creds.naukriEmail);
-      await randomDelay(300, 600);
-      await humanFill(page, passwordInput, creds.naukriPassword);
-      await randomDelay(500, 1000);
+      if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
+        await humanFill(page, usernameInput, creds.naukriEmail);
+        await randomDelay(300, 600);
+        await humanFill(page, passwordInput, creds.naukriPassword);
+        await randomDelay(500, 1000);
 
-      await updateAgentStatus(page, 'Logging In');
-      await humanClick(page, submitBtn);
-      await randomDelay(3000, 5000);
+        await updateAgentStatus(page, 'Logging In');
+        await humanClick(page, submitBtn);
+        await randomDelay(3000, 5000);
 
-      const success = await isNaukriLoggedIn(page);
-      if (success) {
-        console.log('[Naukri Auto-Login] Automated login succeeded!');
-        return true;
+        const success = await isNaukriLoggedIn(page);
+        if (success) {
+          console.log('[Naukri Auto-Login] Automated login succeeded!');
+          return true;
+        }
       }
     }
   } catch (err: any) {
