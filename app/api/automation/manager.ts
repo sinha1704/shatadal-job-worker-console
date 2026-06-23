@@ -18,6 +18,7 @@ export interface SessionStats {
   successes: number;
   applied: number;
   runtime: string;
+  emailsSent?: number;
 }
 
 export interface DailyStats {
@@ -25,12 +26,110 @@ export interface DailyStats {
   totalRuntimeSeconds: number;
   totalApplied: number;
   totalAttempts: number;
+  totalEmailsSent?: number;
 }
 
 export interface PersistentStats {
   currentSession: SessionStats | null;
   sessions: SessionStats[];
   dailyStats: Record<string, DailyStats>;
+}
+
+function migrateStatsWithEmails(stats: PersistentStats) {
+  console.log('[AutomationManager] Running stats email migration...');
+  const leadsFilePath = path.join(process.cwd(), 'data', 'feed_leads.json');
+  if (!fs.existsSync(leadsFilePath)) {
+    for (const s of stats.sessions) {
+      if (s.emailsSent === undefined) s.emailsSent = 0;
+    }
+    return;
+  }
+  
+  try {
+    const leadsContent = fs.readFileSync(leadsFilePath, 'utf-8');
+    const leads = JSON.parse(leadsContent);
+    
+    // Get all emailed leads with valid timestamp
+    const emailedLeads = leads.filter((l: any) => l.emailedAt).map((l: any) => {
+      return {
+        email: l.email,
+        timestamp: new Date(l.emailedAt).getTime()
+      };
+    });
+    
+    // Initialize emailsSent to 0 for all sessions
+    for (const s of stats.sessions) {
+      s.emailsSent = 0;
+    }
+    if (stats.currentSession) {
+      stats.currentSession.emailsSent = 0;
+    }
+    
+    // Attribute each emailed lead to a session
+    for (const lead of emailedLeads) {
+      let matched = false;
+      
+      // Try to find a matching session
+      for (const session of stats.sessions) {
+        const startMs = parseInt(session.id);
+        let durationSeconds = 0;
+        const runtimeStr = session.runtime || '';
+        const hourMatch = runtimeStr.match(/(\d+)h/);
+        const minMatch = runtimeStr.match(/(\d+)m/);
+        const secMatch = runtimeStr.match(/(\d+)s/);
+
+        if (hourMatch) durationSeconds += parseInt(hourMatch[1]) * 3600;
+        if (minMatch) durationSeconds += parseInt(minMatch[1]) * 60;
+        if (secMatch) durationSeconds += parseInt(secMatch[1]);
+        
+        // If aborted or 0, give it a default 15 min window
+        if (durationSeconds === 0) {
+          durationSeconds = 900; 
+        }
+        
+        const endMs = startMs + (durationSeconds * 1000) + 10000; // 10s buffer
+        
+        if (lead.timestamp >= startMs && lead.timestamp <= endMs) {
+          session.emailsSent = (session.emailsSent || 0) + 1;
+          matched = true;
+          break;
+        }
+      }
+      
+      // If not matched, check if it fits in active current session
+      if (!matched && stats.currentSession) {
+        const startMs = parseInt(stats.currentSession.id);
+        if (lead.timestamp >= startMs && lead.timestamp <= Date.now()) {
+          stats.currentSession.emailsSent = (stats.currentSession.emailsSent || 0) + 1;
+          matched = true;
+        }
+      }
+    }
+    
+    // Reset/rebuild totalEmailsSent in dailyStats
+    for (const date in stats.dailyStats) {
+      stats.dailyStats[date].totalEmailsSent = 0;
+    }
+    
+    // Sum from history sessions
+    for (const session of stats.sessions) {
+      const date = session.date;
+      if (date && stats.dailyStats[date]) {
+        if (stats.dailyStats[date].totalEmailsSent === undefined) {
+          stats.dailyStats[date].totalEmailsSent = 0;
+        }
+        stats.dailyStats[date].totalEmailsSent += (session.emailsSent || 0);
+      }
+    }
+    
+    console.log('[AutomationManager] Stats email migration complete!');
+  } catch (err) {
+    console.error('[AutomationManager] Error migrating stats:', err);
+    // fallback default to 0
+    for (const s of stats.sessions) {
+      if (s.emailsSent === undefined) s.emailsSent = 0;
+    }
+  }
 }
 
 export function loadStats(): PersistentStats {
@@ -46,7 +145,27 @@ export function loadStats(): PersistentStats {
       return defaultStats;
     }
     const content = fs.readFileSync(STATS_FILE, 'utf-8');
-    return JSON.parse(content);
+    const stats = JSON.parse(content);
+
+    // Check if we need to migrate/update email counts for past sessions
+    let needsMigration = false;
+    for (const session of stats.sessions) {
+      if (session.emailsSent === undefined) {
+        needsMigration = true;
+        break;
+      }
+    }
+    if (stats.currentSession && stats.currentSession.emailsSent === undefined) {
+      stats.currentSession.emailsSent = 0;
+      needsMigration = true;
+    }
+    
+    if (needsMigration) {
+      migrateStatsWithEmails(stats);
+      saveStats(stats);
+    }
+
+    return stats;
   } catch (e) {
     console.error('[AutomationManager] Error loading stats, using defaults:', e);
     return {
@@ -119,6 +238,7 @@ class AutomationManager {
       attempts: 0,
       successes: 0,
       applied: 0,
+      emailsSent: 0,
       runtime: '00m 00s'
     };
 
@@ -127,7 +247,8 @@ class AutomationManager {
         runsCount: 0,
         totalRuntimeSeconds: 0,
         totalApplied: 0,
-        totalAttempts: 0
+        totalAttempts: 0,
+        totalEmailsSent: 0
       };
     }
     stats.dailyStats[today].runsCount += 1;
@@ -237,11 +358,16 @@ class AutomationManager {
       const elapsedSeconds = Math.floor((Date.now() - parseInt(stats.currentSession.id)) / 1000);
       
       if (!stats.dailyStats[today]) {
-        stats.dailyStats[today] = { runsCount: 1, totalRuntimeSeconds: 0, totalApplied: 0, totalAttempts: 0 };
+        stats.dailyStats[today] = { runsCount: 1, totalRuntimeSeconds: 0, totalApplied: 0, totalAttempts: 0, totalEmailsSent: 0 };
       }
       stats.dailyStats[today].totalRuntimeSeconds += elapsedSeconds;
       stats.dailyStats[today].totalApplied += stats.currentSession.applied;
       stats.dailyStats[today].totalAttempts += stats.currentSession.attempts;
+      
+      if (stats.dailyStats[today].totalEmailsSent === undefined) {
+        stats.dailyStats[today].totalEmailsSent = 0;
+      }
+      stats.dailyStats[today].totalEmailsSent += (stats.currentSession.emailsSent || 0);
 
       // Unshift session to history
       stats.sessions.unshift(stats.currentSession);
@@ -277,6 +403,9 @@ class AutomationManager {
         line.includes('Clicking internal apply') ||
         line.includes('Clicking apply for');
 
+      const isEmailSent = line.includes('✉️ Sending auto-email to:');
+      const isEmailFailed = line.includes('Failed to send auto-email to');
+
       if (isRealSubmission) {
         stats.currentSession.applied += 1;
         stats.currentSession.successes += 1;
@@ -286,6 +415,12 @@ class AutomationManager {
         changed = true;
       } else if (isAttempt) {
         stats.currentSession.attempts += 1;
+        changed = true;
+      } else if (isEmailSent) {
+        stats.currentSession.emailsSent = (stats.currentSession.emailsSent || 0) + 1;
+        changed = true;
+      } else if (isEmailFailed) {
+        stats.currentSession.emailsSent = Math.max(0, (stats.currentSession.emailsSent || 0) - 1);
         changed = true;
       }
     }

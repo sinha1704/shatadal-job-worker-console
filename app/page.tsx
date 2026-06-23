@@ -8,10 +8,10 @@ import { getGraphicOutreachTemplate } from './utils/emailTemplates';
 function parseLeadPost(lead: any) {
   const text = lead.postText || '';
   const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean);
-  
+
   // 1. Extract Role Title
   let roleTitle = '';
-  
+
   // Try common headings for roles
   let openPositionsIndex = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -21,7 +21,7 @@ function parseLeadPost(lead: any) {
       break;
     }
   }
-  
+
   // Look for lines after "Open Positions" or similar heading that look like roles
   if (openPositionsIndex !== -1 && openPositionsIndex < lines.length - 1) {
     for (let j = openPositionsIndex + 1; j < Math.min(lines.length, openPositionsIndex + 4); j++) {
@@ -32,7 +32,7 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   // If not found, look for "Hiring:" or "We're Hiring" patterns directly
   if (!roleTitle) {
     for (const line of lines) {
@@ -50,14 +50,14 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   // Look for any line containing common job titles in the first 5 lines
   if (!roleTitle) {
     const commonTitles = [
-      'Frontend Developer', 'React Developer', 'Full Stack Developer', 'Software Engineer', 
-      'QA Tester', 'Manual Testing', 'QA Engineer', 'Business Consultant', 'VBCS Developer', 
-      'Brand Designer', 'Business Development', 'Customer Support', 'Growth Manager', 
-      'Service Engineer', 'Mobile Developer', 'React Native', 'Physical Design', 'Python Developer', 
+      'Frontend Developer', 'React Developer', 'Full Stack Developer', 'Software Engineer',
+      'QA Tester', 'Manual Testing', 'QA Engineer', 'Business Consultant', 'VBCS Developer',
+      'Brand Designer', 'Business Development', 'Customer Support', 'Growth Manager',
+      'Service Engineer', 'Mobile Developer', 'React Native', 'Physical Design', 'Python Developer',
       'Laravel Developer', 'PHP Developer'
     ];
     for (let i = 0; i < Math.min(lines.length, 5); i++) {
@@ -71,7 +71,7 @@ function parseLeadPost(lead: any) {
       if (roleTitle) break;
     }
   }
-  
+
   // If still not found, check if there's "Open to Work | <role>"
   if (!roleTitle) {
     const openToWorkLine = lines.find((l: string) => l.includes('Open to Work'));
@@ -91,13 +91,13 @@ function parseLeadPost(lead: any) {
       roleTitle = 'Software Engineer / Developer';
     }
   }
-  
+
   // Cleanup role title
   roleTitle = roleTitle.replace(/^[^a-zA-Z0-9]+/, '').replace(/[^a-zA-Z0-9)]+$/, '').trim();
 
   // 2. Extract Company Name
   let company = lead.companyName || 'Hiring Manager';
-  
+
   if (company === 'Hiring Manager' && lead.authorProfile && lead.authorProfile.includes('/company/')) {
     const match = lead.authorProfile.match(/\/company\/([^/]+)/);
     if (match && match[1]) {
@@ -107,7 +107,7 @@ function parseLeadPost(lead: any) {
         .join(' ');
     }
   }
-  
+
   if (company === 'Hiring Manager') {
     for (let i = 0; i < Math.min(lines.length, 4); i++) {
       const line = lines[i];
@@ -133,7 +133,7 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   if (company === 'Hiring Manager' && lead.authorName && !lead.authorName.toLowerCase().includes('recruiter')) {
     company = lead.authorName.split(',')[0].trim();
   }
@@ -190,7 +190,7 @@ export default function DashboardPage() {
     Feed: false
   });
   const [completedPortals, setCompletedPortals] = useState<Record<string, boolean>>({});
-  
+
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const consoleBodyRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -201,6 +201,9 @@ export default function DashboardPage() {
   const [totalApplied, setTotalApplied] = useState(0);
   const [successCount, setSuccessCount] = useState(0);
   const [totalAttempts, setTotalAttempts] = useState(0);
+  const [emailsSent, setEmailsSent] = useState(0);
+  const [historyPage, setHistoryPage] = useState(1);
+  const HISTORY_ITEMS_PER_PAGE = 10;
 
   // Persistent History and Scouter leads
   const [sessionHistory, setSessionHistory] = useState<any[]>([]);
@@ -298,7 +301,7 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success) {
         setSmtpStatus({ type: 'success', message: 'SMTP configuration saved successfully!' });
-        
+
         // Update local state username so that the missing SMTP warning hides immediately
         setSmtpConfig(prev => ({
           ...prev,
@@ -321,7 +324,7 @@ export default function DashboardPage() {
     let host = 'smtp.gmail.com';
     let port = 465;
     let secure = true;
-    
+
     if (preset === 'brevo') {
       host = 'smtp-relay.brevo.com';
       port = 587;
@@ -335,7 +338,7 @@ export default function DashboardPage() {
       port = 587;
       secure = false;
     }
-    
+
     setSmtpConfig(prev => ({
       ...prev,
       preset,
@@ -482,13 +485,14 @@ export default function DashboardPage() {
         if (!statsRes || !statsRes.ok) return;
         const statsData = await statsRes.json().catch(() => null);
         if (!statsData) return;
-        
+
         // Update live stats from persistent server state
         if (statusData.isRunning && statsData.currentSession) {
           setTotalApplied(statsData.currentSession.applied);
           setSuccessCount(statsData.currentSession.successes);
           setTotalAttempts(statsData.currentSession.attempts);
           setSessionRuntime(statsData.currentSession.runtime);
+          setEmailsSent(statsData.currentSession.emailsSent || 0);
           if (!sessionStartRef.current) {
             sessionStartRef.current = parseInt(statsData.currentSession.id);
           }
@@ -499,6 +503,7 @@ export default function DashboardPage() {
           setSuccessCount(lastSession.successes);
           setTotalAttempts(lastSession.attempts);
           setSessionRuntime(lastSession.runtime);
+          setEmailsSent(lastSession.emailsSent || 0);
           sessionStartRef.current = null;
         }
 
@@ -530,7 +535,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!isAuthenticated) return;
     fetchLeads();
-    
+
     // Poll leads every 5 seconds while running to capture new ones in real-time
     let leadsInterval: NodeJS.Timeout | null = null;
     if (isRunning) {
@@ -551,9 +556,9 @@ export default function DashboardPage() {
         const m = Math.floor((elapsed % 3600) / 60);
         const s = elapsed % 60;
         if (h > 0) {
-          setSessionRuntime(`${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m`);
+          setSessionRuntime(`${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m`);
         } else {
-          setSessionRuntime(`${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`);
+          setSessionRuntime(`${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`);
         }
       }, 1000);
       return () => clearInterval(tick);
@@ -598,6 +603,9 @@ export default function DashboardPage() {
             text.includes('Clicking internal apply') ||
             text.includes('Clicking apply for');
 
+          const isEmailSent = text.includes('✉️ Sending auto-email to:');
+          const isEmailFailed = text.includes('Failed to send auto-email to');
+
           if (isRealSubmission) {
             setTotalApplied(prev => prev + 1);
             setSuccessCount(prev => prev + 1);
@@ -606,6 +614,10 @@ export default function DashboardPage() {
             });
           } else if (isAttempt) {
             setTotalAttempts(prev => prev + 1);
+          } else if (isEmailSent) {
+            setEmailsSent(prev => prev + 1);
+          } else if (isEmailFailed) {
+            setEmailsSent(prev => Math.max(0, prev - 1));
           }
 
           // Toggle running state immediately when child process exits
@@ -666,6 +678,7 @@ export default function DashboardPage() {
     setTotalApplied(0);
     setSuccessCount(0);
     setTotalAttempts(0);
+    setEmailsSent(0);
     setSessionRuntime('00m 00s');
     sessionStartRef.current = Date.now();
     try {
@@ -720,6 +733,7 @@ export default function DashboardPage() {
         setTotalApplied(0);
         setSuccessCount(0);
         setTotalAttempts(0);
+        setEmailsSent(0);
         setSessionRuntime('00m 00s');
       }
     } catch (err) {
@@ -758,7 +772,7 @@ export default function DashboardPage() {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden relative selection:bg-indigo-500 selection:text-white" style={{height: '100dvh'}}>
+    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden relative selection:bg-indigo-500 selection:text-white" style={{ height: '100dvh' }}>
       {/* Background ambient glows */}
       <div className="absolute top-[-10%] left-[-5%] w-[45%] h-[45%] bg-indigo-600/5 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[45%] h-[45%] bg-purple-600/5 rounded-full blur-[140px] pointer-events-none" />
@@ -799,15 +813,15 @@ export default function DashboardPage() {
 
       {/* Main Dashboard Space */}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden p-4 gap-4 relative z-10">
-        
+
         {/* Left Control and Portal Cards */}
         <div className="w-full lg:w-80 flex flex-col gap-4 flex-shrink-0 overflow-hidden">
-          
+
           {/* Action Trigger Card */}
           <div className="backdrop-blur-xl bg-slate-900/40 rounded-xl border border-slate-800/80 p-4 shadow-lg relative overflow-hidden flex-shrink-0">
             <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Agent Controller</h3>
-            
+
             <div className="flex flex-col gap-3">
               {!isRunning ? (
                 <button
@@ -852,13 +866,12 @@ export default function DashboardPage() {
                 ].map((portal) => (
                   <div
                     key={portal.name}
-                    className={`border rounded-lg p-2.5 flex items-center justify-between transition-all ${
-                      portal.status === 'active'
+                    className={`border rounded-lg p-2.5 flex items-center justify-between transition-all ${portal.status === 'active'
                         ? 'bg-indigo-650/10 border-indigo-500/30 text-indigo-300 shadow-sm'
                         : !selectedPortals[portal.name]
-                        ? 'bg-slate-950/5 border-slate-950/20 text-slate-650 opacity-60'
-                        : 'bg-slate-950/20 border-slate-900 text-slate-400'
-                    } ${!isRunning ? 'cursor-pointer hover:border-slate-800/85 hover:bg-slate-900/10' : ''}`}
+                          ? 'bg-slate-950/5 border-slate-950/20 text-slate-650 opacity-60'
+                          : 'bg-slate-950/20 border-slate-900 text-slate-400'
+                      } ${!isRunning ? 'cursor-pointer hover:border-slate-800/85 hover:bg-slate-900/10' : ''}`}
                     onClick={() => {
                       if (!isRunning) {
                         setSelectedPortals((prev): Record<string, boolean> => {
@@ -907,19 +920,17 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center">
                       {!isRunning ? (
-                        <div 
-                          className={`w-8 h-4 rounded-full relative transition-all duration-200 cursor-pointer ${
-                            selectedPortals[portal.name] 
-                              ? 'bg-gradient-to-r from-indigo-500 to-purple-600' 
+                        <div
+                          className={`w-8 h-4 rounded-full relative transition-all duration-200 cursor-pointer ${selectedPortals[portal.name]
+                              ? 'bg-gradient-to-r from-indigo-500 to-purple-600'
                               : 'bg-slate-850'
-                          }`}
-                        >
-                          <div 
-                            className={`absolute top-[2px] start-[2px] h-3 w-3 rounded-full transition-all duration-200 ${
-                              selectedPortals[portal.name] 
-                                ? 'translate-x-4 bg-white' 
-                                : 'translate-x-0 bg-slate-500'
                             }`}
+                        >
+                          <div
+                            className={`absolute top-[2px] start-[2px] h-3 w-3 rounded-full transition-all duration-200 ${selectedPortals[portal.name]
+                                ? 'translate-x-4 bg-white'
+                                : 'translate-x-0 bg-slate-500'
+                              }`}
                           />
                         </div>
                       ) : (
@@ -1002,9 +1013,9 @@ export default function DashboardPage() {
 
         {/* Right Side: Metrics and Log Console container */}
         <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-hidden">
-          
+
           {/* Engine Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 flex-shrink-0">
             {(() => {
               const activePortalCount = Object.values(selectedPortals).filter(Boolean).length;
               const successRate = totalAttempts > 0
@@ -1020,10 +1031,11 @@ export default function DashboardPage() {
                 ? `${activePortalCount} active now`
                 : `${activePortalCount} portal${activePortalCount !== 1 ? 's' : ''} selected`;
               const metrics = [
-                { label: 'Success Rate',    value: totalAttempts > 0 ? `${successRate}%` : '—', desc: successDesc,  color: 'from-emerald-500/15 to-emerald-600/5', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-                { label: 'Total Applied',   value: totalApplied.toLocaleString(),                desc: appliedDesc,  color: 'from-indigo-500/15 to-indigo-600/5',  text: 'text-indigo-400',  border: 'border-indigo-500/20' },
+                { label: 'Success Rate', value: totalAttempts > 0 ? `${successRate}%` : '—', desc: successDesc, color: 'from-emerald-500/15 to-emerald-600/5', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+                { label: 'Total Applied', value: totalApplied.toLocaleString(), desc: appliedDesc, color: 'from-indigo-500/15 to-indigo-600/5', text: 'text-indigo-400', border: 'border-indigo-500/20' },
+                { label: 'Emails Fired', value: emailsSent.toLocaleString(), desc: isRunning ? 'Outreach sending...' : 'Outreach emails sent', color: 'from-amber-500/15 to-amber-600/5', text: 'text-amber-400', border: 'border-amber-500/20' },
                 { label: 'Session Runtime', value: sessionRuntime !== '00m 00s' ? sessionRuntime : '—', desc: isRunning ? 'Live timer' : (sessionRuntime !== '00m 00s' ? 'Last session' : 'Not running'), color: 'from-purple-500/15 to-purple-600/5', text: 'text-purple-400', border: 'border-purple-500/20' },
-                { label: 'Tunnel Status',   value: isRunning ? `${activePortalCount}/${activePortalCount} Active` : `${activePortalCount} Ready`, desc: tunnelDesc, color: 'from-cyan-500/15 to-cyan-600/5',   text: 'text-cyan-400',   border: 'border-cyan-500/20' },
+                { label: 'Tunnel Status', value: isRunning ? `${activePortalCount}/${activePortalCount} Active` : `${activePortalCount} Ready`, desc: tunnelDesc, color: 'from-cyan-500/15 to-cyan-600/5', text: 'text-cyan-400', border: 'border-cyan-500/20' },
               ];
               return metrics.map((metric, i) => (
                 <div key={i} className={`backdrop-blur-xl bg-gradient-to-br ${metric.color} rounded-xl border ${metric.border} p-3 shadow-sm relative overflow-hidden transition-all hover:scale-[1.01] hover:border-slate-700/80`}>
@@ -1038,7 +1050,7 @@ export default function DashboardPage() {
           {/* Tabbed Panel container */}
           <div className="flex-1 flex flex-col backdrop-blur-xl bg-slate-900/40 rounded-xl border border-slate-800/80 shadow-lg overflow-hidden relative">
             <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-purple-500/40 to-transparent" />
-            
+
             {/* Tabbed Header */}
             <div className="h-12 border-b border-slate-800/80 px-4 flex items-center justify-between bg-slate-950/20 flex-shrink-0 overflow-x-auto">
               <div className="flex items-center space-x-1">
@@ -1051,18 +1063,17 @@ export default function DashboardPage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                      activeTab === tab.id
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${activeTab === tab.id
                         ? 'bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 shadow-sm'
                         : 'border border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-850/20'
-                    }`}
+                      }`}
                   >
                     <span>{tab.icon}</span>
                     <span>{tab.name}</span>
                   </button>
                 ))}
               </div>
-              
+
               <div className="flex items-center gap-2 flex-shrink-0">
                 {activeTab === 'console' && (
                   <button
@@ -1099,7 +1110,7 @@ export default function DashboardPage() {
                 {logs.length > 0 ? (
                   logs.map((log, index) => {
                     let colorClass = 'text-slate-400';
-                    
+
                     if (log.includes('[LinkedIn]')) colorClass = 'text-blue-400 font-semibold';
                     else if (log.includes('[Indeed]')) colorClass = 'text-indigo-400 font-semibold';
                     else if (log.includes('[Naukri]')) colorClass = 'text-amber-400 font-semibold';
@@ -1110,7 +1121,7 @@ export default function DashboardPage() {
                     else if (log.includes('[Process System]')) colorClass = 'text-cyan-400 font-semibold';
                     else if (log.includes('[Form Fill]')) colorClass = 'text-slate-300';
                     else if (log.includes('[LinkedIn Feed Scouter]')) colorClass = 'text-sky-400 font-medium';
-                    
+
                     return (
                       <div key={index} className={`${colorClass} whitespace-pre-wrap`}>
                         {log}
@@ -1152,44 +1163,40 @@ export default function DashboardPage() {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/15 p-3 rounded-2xl">
                           <div
                             onClick={() => setLeadsFilter('all')}
-                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
-                              leadsFilter === 'all'
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'all'
                                 ? 'bg-indigo-600/15 ring-1 ring-indigo-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
-                            }`}
+                              }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Leads Collected</span>
                             <span className="text-sm font-black text-indigo-400 mt-0.5 block font-mono">{leads.length}</span>
                           </div>
                           <div
                             onClick={() => setLeadsFilter('emailed')}
-                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
-                              leadsFilter === 'emailed'
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'emailed'
                                 ? 'bg-emerald-650/15 ring-1 ring-emerald-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
-                            }`}
+                              }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Emailed Managers</span>
                             <span className="text-sm font-black text-emerald-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.emailedAt).length}</span>
                           </div>
                           <div
                             onClick={() => setLeadsFilter('pending')}
-                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
-                              leadsFilter === 'pending'
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'pending'
                                 ? 'bg-indigo-650/15 ring-1 ring-indigo-450/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
-                            }`}
+                              }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Pending Outreach</span>
                             <span className="text-sm font-black text-indigo-300 mt-0.5 block font-mono">{leads.filter((l: any) => !l.emailedAt && !l.outreachFailed).length}</span>
                           </div>
                           <div
                             onClick={() => setLeadsFilter('failed')}
-                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
-                              leadsFilter === 'failed'
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'failed'
                                 ? 'bg-rose-650/15 ring-1 ring-rose-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
-                            }`}
+                              }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Failed Outreach</span>
                             <span className="text-sm font-black text-rose-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.outreachFailed).length}</span>
@@ -1228,13 +1235,12 @@ export default function DashboardPage() {
                                         </div>
                                       </div>
                                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                          lead.jobType === 'Remote'
+                                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${lead.jobType === 'Remote'
                                             ? 'bg-sky-500/10 border border-sky-500/20 text-sky-400'
                                             : lead.jobType === 'Contract'
-                                            ? 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
-                                            : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400'
-                                        }`}>
+                                              ? 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+                                              : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400'
+                                          }`}>
                                           {lead.jobType || 'Full-time'}
                                         </span>
                                         {lead.emailedAt ? (
@@ -1280,16 +1286,14 @@ export default function DashboardPage() {
                                     </div>
 
                                     {/* Recruiter Email Action section */}
-                                    <div className={`flex items-center justify-between bg-slate-950/35 border-l-2 p-2.5 rounded-r-xl rounded-l-sm mb-3 ${
-                                      lead.outreachFailed ? 'border-rose-500/50' : 'border-emerald-500/50'
-                                    }`}>
+                                    <div className={`flex items-center justify-between bg-slate-950/35 border-l-2 p-2.5 rounded-r-xl rounded-l-sm mb-3 ${lead.outreachFailed ? 'border-rose-500/50' : 'border-emerald-500/50'
+                                      }`}>
                                       <div className="overflow-hidden pr-2">
                                         <span className="text-[8px] text-slate-500 uppercase font-bold tracking-wider block mb-0.5">
                                           {lead.outreachFailed ? 'Recruiter Email (Delivery Failed)' : 'Recruiter Direct Email'}
                                         </span>
-                                        <code className={`text-xs font-extrabold truncate select-all block font-mono tracking-tight ${
-                                          lead.outreachFailed ? 'text-rose-400 font-bold' : 'text-emerald-400 font-extrabold'
-                                        }`}>
+                                        <code className={`text-xs font-extrabold truncate select-all block font-mono tracking-tight ${lead.outreachFailed ? 'text-rose-400 font-bold' : 'text-emerald-400 font-extrabold'
+                                          }`}>
                                           {lead.email}
                                         </code>
                                         {lead.outreachFailed && lead.outreachError && (
@@ -1329,9 +1333,8 @@ export default function DashboardPage() {
 
                                     {/* Collapsible Post Body Content */}
                                     <div className="relative mb-2">
-                                      <div className={`text-[11px] text-slate-400 leading-relaxed bg-slate-950/15 p-3 rounded-xl whitespace-pre-wrap select-text transition-all duration-300 ${
-                                        expandedLeads[idx] ? '' : 'max-h-[85px] overflow-hidden'
-                                      }`}>
+                                      <div className={`text-[11px] text-slate-400 leading-relaxed bg-slate-950/15 p-3 rounded-xl whitespace-pre-wrap select-text transition-all duration-300 ${expandedLeads[idx] ? '' : 'max-h-[85px] overflow-hidden'
+                                        }`}>
                                         {lead.postText}
                                       </div>
                                       {!expandedLeads[idx] && (
@@ -1403,7 +1406,7 @@ export default function DashboardPage() {
                             <div>
                               <span className="text-[9px] text-slate-500 font-bold">{date}</span>
                               <div className="text-[11px] font-bold text-slate-350 mt-1">
-                                {stat.totalApplied} applied ({stat.runsCount} runs)
+                                {stat.totalApplied} applied | {stat.totalEmailsSent || 0} emails ({stat.runsCount} runs)
                               </div>
                             </div>
                             <span className="text-[9px] text-indigo-400 mt-2 font-semibold">🕒 {durationStr} active</span>
@@ -1417,45 +1420,107 @@ export default function DashboardPage() {
                 {/* Session list table */}
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Session-wise Logs</h4>
-                  {sessionHistory.length === 0 ? (
-                    <div className="text-center text-slate-600 select-none py-8 border border-dashed border-slate-900 rounded-lg">
-                      <span className="text-xs">No completed sessions history yet.</span>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto border border-slate-900 rounded-lg">
-                      <table className="w-full text-[11px] text-left border-collapse min-w-[500px]">
-                        <thead>
-                          <tr className="bg-slate-950/60 text-slate-500 border-b border-slate-900 select-none">
-                            <th className="p-2.5">Date</th>
-                            <th className="p-2.5">Start</th>
-                            <th className="p-2.5">End</th>
-                            <th className="p-2.5">Runtime</th>
-                            <th className="p-2.5 text-center">Applied / Attempts</th>
-                            <th className="p-2.5 text-right">Success Rate</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sessionHistory.map((sess: any, idx: number) => {
-                            const successRate = sess.attempts > 0
-                              ? ((sess.successes / sess.attempts) * 100).toFixed(0)
-                              : '0';
-                            return (
-                              <tr key={idx} className="border-b border-slate-900/40 hover:bg-slate-900/10 text-slate-300 font-mono">
-                                <td className="p-2.5 text-slate-450">{sess.date}</td>
-                                <td className="p-2.5">{sess.startTime}</td>
-                                <td className="p-2.5">{sess.endTime || 'Aborted'}</td>
-                                <td className="p-2.5 text-indigo-400">{sess.runtime}</td>
-                                <td className="p-2.5 text-center">{sess.applied} / {sess.attempts}</td>
-                                <td className={`p-2.5 text-right font-bold ${parseInt(successRate) >= 60 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                                  {successRate}%
-                                </td>
+                  {(() => {
+                    const totalPages = Math.ceil(sessionHistory.length / HISTORY_ITEMS_PER_PAGE);
+                    const safeHistoryPage = Math.min(Math.max(1, historyPage), totalPages || 1);
+                    const paginatedHistory = sessionHistory.slice((safeHistoryPage - 1) * HISTORY_ITEMS_PER_PAGE, safeHistoryPage * HISTORY_ITEMS_PER_PAGE);
+                    
+                    return sessionHistory.length === 0 ? (
+                      <div className="text-center text-slate-600 select-none py-8 border border-dashed border-slate-900 rounded-lg">
+                        <span className="text-xs">No completed sessions history yet.</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto border border-slate-900 rounded-lg">
+                          <table className="w-full text-[11px] text-left border-collapse min-w-[500px]">
+                            <thead>
+                              <tr className="bg-slate-950/60 text-slate-500 border-b border-slate-900 select-none">
+                                <th className="p-2.5">Date</th>
+                                <th className="p-2.5">Start</th>
+                                <th className="p-2.5">End</th>
+                                <th className="p-2.5">Runtime</th>
+                                <th className="p-2.5 text-center">Applied / Attempts</th>
+                                <th className="p-2.5 text-center">Emails Sent</th>
+                                <th className="p-2.5 text-right">Success Rate</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                            </thead>
+                            <tbody>
+                              {paginatedHistory.map((sess: any, idx: number) => {
+                                const successRate = sess.attempts > 0
+                                  ? ((sess.successes / sess.attempts) * 100).toFixed(0)
+                                  : '0';
+                                return (
+                                  <tr key={idx} className="border-b border-slate-900/40 hover:bg-slate-900/10 text-slate-300 font-mono">
+                                    <td className="p-2.5 text-slate-450">{sess.date}</td>
+                                    <td className="p-2.5">{sess.startTime}</td>
+                                    <td className="p-2.5">{sess.endTime || 'Aborted'}</td>
+                                    <td className="p-2.5 text-indigo-400">{sess.runtime}</td>
+                                    <td className="p-2.5 text-center">{sess.applied} / {sess.attempts}</td>
+                                    <td className="p-2.5 text-center text-amber-400">{sess.emailsSent || 0}</td>
+                                    <td className={`p-2.5 text-right font-bold ${parseInt(successRate) >= 60 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                                      {successRate}%
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {totalPages > 1 && (
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 py-2 mt-2 bg-slate-950/20 border border-slate-900 rounded-lg text-[10px] text-slate-400 font-mono">
+                            <div className="text-slate-500">
+                              Showing <span className="font-bold text-slate-350">{(safeHistoryPage - 1) * HISTORY_ITEMS_PER_PAGE + 1}</span> to <span className="font-bold text-slate-350">{Math.min(safeHistoryPage * HISTORY_ITEMS_PER_PAGE, sessionHistory.length)}</span> of <span className="font-bold text-slate-350">{sessionHistory.length}</span> sessions
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                                disabled={safeHistoryPage === 1}
+                                className="px-2.5 py-1 rounded border border-slate-850 bg-slate-900/40 hover:bg-slate-850/60 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent disabled:border-transparent transition-all cursor-pointer font-bold select-none"
+                              >
+                                Prev
+                              </button>
+                              
+                              {Array.from({ length: totalPages }).map((_, pIdx) => {
+                                const pNum = pIdx + 1;
+                                if (totalPages > 5 && pNum !== 1 && pNum !== totalPages && Math.abs(pNum - safeHistoryPage) > 1) {
+                                  if (pNum === 2 && safeHistoryPage > 3) {
+                                    return <span key={pNum} className="px-1 text-slate-600 select-none">...</span>;
+                                  }
+                                  if (pNum === totalPages - 1 && safeHistoryPage < totalPages - 2) {
+                                    return <span key={pNum} className="px-1 text-slate-600 select-none">...</span>;
+                                  }
+                                  return null;
+                                }
+                                
+                                return (
+                                  <button
+                                    key={pNum}
+                                    onClick={() => setHistoryPage(pNum)}
+                                    className={`px-2 py-0.5 rounded transition-all cursor-pointer select-none font-bold ${
+                                      safeHistoryPage === pNum
+                                        ? 'bg-indigo-500/20 border border-indigo-555/40 text-indigo-400'
+                                        : 'border border-transparent hover:border-slate-850 hover:bg-slate-900/40 text-slate-400'
+                                    }`}
+                                  >
+                                    {pNum}
+                                  </button>
+                                );
+                              })}
+
+                              <button
+                                onClick={() => setHistoryPage(p => Math.min(totalPages, p + 1))}
+                                disabled={safeHistoryPage === totalPages}
+                                className="px-2.5 py-1 rounded border border-slate-850 bg-slate-900/40 hover:bg-slate-850/60 text-slate-300 disabled:opacity-30 disabled:hover:bg-transparent disabled:border-transparent transition-all cursor-pointer font-bold select-none"
+                              >
+                                Next
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1465,7 +1530,7 @@ export default function DashboardPage() {
               <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-950/80 p-4 gap-4">
                 {/* Left side: Composer & SMTP settings */}
                 <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-1">
-                  
+
                   {/* SMTP Credentials Status Header / Toggle */}
                   <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex items-center justify-between shadow-sm">
                     <div className="flex items-center gap-3">
@@ -1480,7 +1545,7 @@ export default function DashboardPage() {
                           SMTP Mailer Settings
                         </h4>
                         <p className="text-[10px] text-slate-500">
-                          {smtpConfig.username 
+                          {smtpConfig.username
                             ? `Active: ${smtpConfig.preset.toUpperCase()} (${smtpConfig.username})`
                             : 'No SMTP configuration saved yet'}
                         </p>
@@ -1505,11 +1570,10 @@ export default function DashboardPage() {
                               key={preset}
                               type="button"
                               onClick={() => handlePresetChange(preset)}
-                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-all ${
-                                smtpConfig.preset === preset
+                              className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-all ${smtpConfig.preset === preset
                                   ? 'bg-indigo-600 text-white border border-indigo-500'
                                   : 'bg-slate-950 text-slate-500 border border-slate-900 hover:text-slate-300'
-                              }`}
+                                }`}
                             >
                               {preset}
                             </button>
@@ -1621,11 +1685,10 @@ export default function DashboardPage() {
                       </div>
 
                       {smtpStatus && (
-                        <div className={`text-xs font-semibold p-2.5 rounded-lg text-center mt-2.5 ${
-                          smtpStatus.type === 'success' 
-                            ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-400' 
+                        <div className={`text-xs font-semibold p-2.5 rounded-lg text-center mt-2.5 ${smtpStatus.type === 'success'
+                            ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-400'
                             : 'bg-rose-500/10 border border-rose-500/25 text-rose-450'
-                        }`}>
+                          }`}>
                           {smtpStatus.type === 'success' ? '✅' : '❌'} {smtpStatus.message}
                         </div>
                       )}
@@ -1673,17 +1736,15 @@ export default function DashboardPage() {
                               <div
                                 key={idx}
                                 title={status === 'already-sent' ? `Already emailed on ${leads.find((l: any) => l.email === email)?.emailedAt?.slice(0, 10)}` : status === 'duplicate' ? 'Duplicate in list' : 'Ready to send'}
-                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
-                                  status === 'new'
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${status === 'new'
                                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                                     : status === 'duplicate'
-                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                                }`}
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                                      : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                  }`}
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                  status === 'new' ? 'bg-emerald-400' : status === 'duplicate' ? 'bg-amber-400' : 'bg-rose-400'
-                                }`} />
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status === 'new' ? 'bg-emerald-400' : status === 'duplicate' ? 'bg-amber-400' : 'bg-rose-400'
+                                  }`} />
                                 <span className="font-mono truncate max-w-[180px]">{email}</span>
                                 {status === 'already-sent' && <span className="text-[8px] opacity-70 ml-0.5">✓ sent</span>}
                                 {status === 'duplicate' && <span className="text-[8px] opacity-70 ml-0.5">×2</span>}
