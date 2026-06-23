@@ -1956,6 +1956,18 @@ async function runLinkedInFeedScouter(page: any) {
     const postCount = postsData.length;
     console.log(`[LinkedIn Feed Scouter] Found and parsed ${postCount} post containers in current view.`);
 
+    if (postCount === 0) {
+      console.log(`[LinkedIn Feed Scouter] [Debug] Found 0 posts. Capturing page state...`);
+      try {
+        const debugHtml = await page.content();
+        fs.writeFileSync('c:\\MyPerosnalAgent\\my-personal-agent\\scratch\\scouter_debug.html', debugHtml, 'utf-8');
+        await page.screenshot({ path: 'c:\\MyPerosnalAgent\\my-personal-agent\\scratch\\scouter_debug.png' });
+        console.log(`[LinkedIn Feed Scouter] [Debug] Saved page screenshot to scratch/scouter_debug.png and HTML to scratch/scouter_debug.html`);
+      } catch (err: any) {
+        console.warn(`[LinkedIn Feed Scouter] [Debug] Failed to capture debug state: ${err.message}`);
+      }
+    }
+
     const hiringKeywords = [
       'hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 
       'apply to', 'send resume', 'send cv', 'immediate joiner', 'share resume', 'share cv', 
