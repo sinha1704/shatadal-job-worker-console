@@ -885,54 +885,96 @@ export default function DashboardPage() {
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-4 relative z-10">
 
         {isVercel && (
-          isLocalServerOnline ? (
-            <div className="backdrop-blur-xl bg-emerald-950/20 border border-emerald-500/25 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
-              <div className="flex items-center space-x-3.5">
-                <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
-                  <span className="absolute w-6 h-6 rounded-full border-2 border-emerald-500/20 border-t-emerald-500 animate-spin" />
-                  <span className="absolute w-4 h-4 rounded-full bg-emerald-500/25 animate-ping" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_12px_#10b981]" />
+          <div className="backdrop-blur-xl bg-slate-900/30 border border-slate-800/80 rounded-xl p-4 md:p-5 flex flex-col md:flex-row items-center justify-between gap-5 shadow-lg flex-shrink-0 animate-fade-in relative overflow-hidden">
+            {/* Ambient Background Glow */}
+            <div className={`absolute -right-20 -top-20 w-48 h-48 rounded-full blur-3xl opacity-10 transition-all duration-1000 ${isLocalServerOnline ? 'bg-emerald-500' : 'bg-indigo-500'}`} />
+            
+            <div className="flex flex-col sm:flex-row items-center gap-5 md:gap-7 w-full md:w-auto">
+              {/* Animation Graphic System */}
+              <div className="flex items-center justify-center space-x-4 flex-shrink-0">
+                {/* Node 1: Cockpit Terminal */}
+                <div className="relative flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-center shadow-inner relative z-10">
+                    <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    {isLocalServerOnline && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-950 animate-ping" />
+                    )}
+                  </div>
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-1.5">Cockpit Deck</span>
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-200">Outbound Execution Core Linked</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    The background execution engine is synchronized with this control deck. System is fully operational and ready to process automated job searches, direct applications, and outreach dispatches.
-                  </p>
+
+                {/* Animated Bridge */}
+                <div className="w-16 md:w-24 h-5 flex flex-col items-center justify-center relative">
+                  <div className="w-full h-[2px] bg-slate-800 relative rounded-full">
+                    {isLocalServerOnline ? (
+                      <>
+                        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 rounded-full animate-pulse" />
+                        {/* Moving spark */}
+                        <div className="absolute -top-[2px] h-1.5 w-1.5 bg-white rounded-full shadow-[0_0_6px_#fff] animate-pulse-beam" />
+                      </>
+                    ) : (
+                      <div className="absolute inset-0 border-t border-dashed border-slate-700" />
+                    )}
+                  </div>
+                  {!isLocalServerOnline && (
+                    <div className="absolute w-6 h-6 rounded-full border border-indigo-500/20 bg-indigo-500/5 animate-scan-radar flex items-center justify-center" />
+                  )}
+                  <span className={`text-[8px] font-extrabold tracking-widest uppercase mt-2.5 ${isLocalServerOnline ? 'text-emerald-400 animate-pulse' : 'text-slate-500'}`}>
+                    {isLocalServerOnline ? 'Linked' : 'Probing'}
+                  </span>
+                </div>
+
+                {/* Node 2: Automation Core */}
+                <div className="relative flex flex-col items-center">
+                  <div className={`w-12 h-12 rounded-xl bg-slate-950/80 border flex items-center justify-center shadow-inner relative z-10 transition-colors duration-300 ${
+                    isLocalServerOnline ? 'border-emerald-500/30' : 'border-slate-800'
+                  }`}>
+                    <svg className={`w-5 h-5 transition-colors duration-300 ${isLocalServerOnline ? 'text-emerald-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                    </svg>
+                    {isLocalServerOnline ? (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-slate-950 animate-pulse shadow-[0_0_8px_#10b981]" />
+                    ) : (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500/60 rounded-full border border-slate-950 animate-pulse" />
+                    )}
+                  </div>
+                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mt-1.5">Execution Core</span>
                 </div>
               </div>
-              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-500/20 flex-shrink-0 flex items-center gap-1.5 select-none">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Execution Link Active</span>
+
+              {/* Status Text Block */}
+              <div className="text-center sm:text-left">
+                <div className="flex items-center justify-center sm:justify-start space-x-2">
+                  <span className={`w-2 h-2 rounded-full ${isLocalServerOnline ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-amber-500 animate-pulse'}`} />
+                  <h4 className="text-xs font-bold text-slate-200 tracking-wide">
+                    {isLocalServerOnline ? 'Data Stream Synchronized' : 'System Engine Standby'}
+                  </h4>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 max-w-[420px] leading-relaxed">
+                  {isLocalServerOnline 
+                    ? 'The autonomous task execution matrix is connected. Dispatched requests, profile matching engines, and outbound outreach channels are fully operational.'
+                    : 'Awaiting coordination with the outbound automation engine. Link the control cockpit interface to begin auto-apply workflows and stream real-time execution logs.'}
+                </p>
               </div>
             </div>
-          ) : (
-            <div className="backdrop-blur-xl bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
-              <div className="flex items-center space-x-3.5">
-                <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
-                  <span className="absolute w-6 h-6 rounded-full border border-indigo-500/10" />
-                  <span className="absolute w-4 h-4 rounded-full bg-indigo-500/10 animate-pulse" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500/30" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-205">Standby Mode — Control Core Offline</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    The background execution core is currently disconnected. Synchronize this control cockpit with your local agent core to enable live job searches, auto-apply dispatches, and real-time logging.
-                  </p>
-                </div>
-              </div>
+
+            {/* Dynamic Sync Trigger Button */}
+            {!isLocalServerOnline && (
               <a 
                 href="http://localhost:3000" 
                 target="_blank" 
                 rel="noreferrer" 
-                className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3.5 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02] active:scale-[0.98]"
+                className="text-[10px] font-bold text-white bg-gradient-to-r from-indigo-650 to-purple-600 hover:from-indigo-550 hover:to-purple-500 px-4 py-2 rounded-lg border border-indigo-500/20 transition-all flex-shrink-0 flex items-center gap-2 cursor-pointer shadow-md hover:scale-[1.02] active:scale-[0.98]"
               >
                 <span>Synchronize Core</span>
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
               </a>
-            </div>
-          )
+            )}
+          </div>
         )}
 
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 overflow-hidden">
