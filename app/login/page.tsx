@@ -23,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
 
     setTimeout(() => {
-      if (email === 'shatadal17@gmail.com' && password === 'Rupam@172001') {
+      if (email === 'dummyshatadal@yopmail.com' && password === '12345678') {
         localStorage.setItem('isAuthenticated', 'true');
         router.push('/');
       } else {
@@ -71,7 +71,7 @@ export default function LoginPage() {
               <input
                 type="email"
                 required
-                placeholder="shatadal17@gmail.com"
+                placeholder="dummyshatadal@yopmail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 focus:outline-none transition-all text-sm placeholder:text-slate-600"
