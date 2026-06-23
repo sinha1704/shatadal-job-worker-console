@@ -180,6 +180,8 @@ export default function DashboardPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isVercel, setIsVercel] = useState(false);
+  const [apiBaseUrl, setApiBaseUrl] = useState('');
+  const [isLocalServerOnline, setIsLocalServerOnline] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [activePortal, setActivePortal] = useState<string>('LinkedIn');
   const [loading, setLoading] = useState(false);
@@ -261,10 +263,34 @@ export default function DashboardPage() {
       setIsAuthenticated(true);
     }
     if (typeof window !== 'undefined') {
-      setIsVercel(
-        window.location.hostname.includes('vercel.app') || 
-        window.location.hostname.includes('shatadalpersonalassistent')
-      );
+      const isCloud = window.location.hostname.includes('vercel.app') || 
+                      window.location.hostname.includes('shatadalpersonalassistent');
+      setIsVercel(isCloud);
+
+      if (isCloud) {
+        // Probe local server
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
+
+        fetch('http://localhost:3000/api/automation/status', { 
+          signal: controller.signal,
+          mode: 'cors'
+        })
+          .then(res => {
+            clearTimeout(timeoutId);
+            if (res.ok) {
+              setIsLocalServerOnline(true);
+              setApiBaseUrl('http://localhost:3000');
+              console.log('[System] Connected to local automation server at http://localhost:3000');
+            }
+          })
+          .catch(() => {
+            clearTimeout(timeoutId);
+            setIsLocalServerOnline(false);
+            setApiBaseUrl('');
+            console.log('[System] Local automation server is offline');
+          });
+      }
     }
   }, [router]);
 
@@ -273,7 +299,7 @@ export default function DashboardPage() {
     if (!isAuthenticated) return;
     const fetchSmtpConfig = async () => {
       try {
-        const res = await fetch('/api/automation/email-config');
+        const res = await fetch(`${apiBaseUrl}/api/automation/email-config`);
         if (res.ok) {
           const data = await res.json();
           setSmtpConfig({
@@ -292,13 +318,13 @@ export default function DashboardPage() {
       }
     };
     fetchSmtpConfig();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, apiBaseUrl]);
 
   const handleSaveSmtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSmtpStatus(null);
     try {
-      const res = await fetch('/api/automation/email-config', {
+      const res = await fetch(`${apiBaseUrl}/api/automation/email-config`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -424,7 +450,7 @@ export default function DashboardPage() {
     setOutreachLogs([`🚀 Starting outreach to ${parsedEmailList.length} recipient(s)...`]);
 
     try {
-      const res = await fetch('/api/automation/send-email', {
+      const res = await fetch(`${apiBaseUrl}/api/automation/send-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -448,7 +474,7 @@ export default function DashboardPage() {
           if (r.success) {
             newLogs.push(`✅ [SUCCESS] ${r.email}`);
             // Mark this lead as contacted in feed_leads.json
-            await fetch('/api/automation/leads', {
+            await fetch(`${apiBaseUrl}/api/automation/leads`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: r.email, subject: outreachSubject })
@@ -456,7 +482,7 @@ export default function DashboardPage() {
           } else {
             newLogs.push(`❌ [FAILED] ${r.email}: ${r.error}`);
             // Mark this lead as outreach failed in feed_leads.json
-            await fetch('/api/automation/leads', {
+            await fetch(`${apiBaseUrl}/api/automation/leads`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: r.email, failed: true, error: r.error })
@@ -480,9 +506,39 @@ export default function DashboardPage() {
 
     const fetchData = async () => {
       try {
+        let currentBaseUrl = apiBaseUrl;
+
+        // If we are on Vercel and local server is offline, probe it to see if it came online
+        if (isVercel && !isLocalServerOnline) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1000);
+          try {
+            const probeRes = await fetch('http://localhost:3000/api/automation/status', {
+              signal: controller.signal,
+              mode: 'cors'
+            });
+            if (probeRes.ok) {
+              clearTimeout(timeoutId);
+              setIsLocalServerOnline(true);
+              setApiBaseUrl('http://localhost:3000');
+              currentBaseUrl = 'http://localhost:3000';
+              console.log('[System] Local automation server detected online!');
+            }
+          } catch {
+            clearTimeout(timeoutId);
+          }
+        }
+
         // Fetch status
-        const statusRes = await fetch('/api/automation/status').catch(() => null);
-        if (!statusRes || !statusRes.ok) return;
+        const statusRes = await fetch(`${currentBaseUrl}/api/automation/status`).catch(() => null);
+        if (!statusRes || !statusRes.ok) {
+          if (currentBaseUrl) {
+            setIsLocalServerOnline(false);
+            setApiBaseUrl('');
+            console.log('[System] Local automation server went offline.');
+          }
+          return;
+        }
         const statusData = await statusRes.json().catch(() => null);
         if (!statusData) return;
         setIsRunning(statusData.isRunning);
@@ -495,7 +551,7 @@ export default function DashboardPage() {
         }
 
         // Fetch stats
-        const statsRes = await fetch('/api/automation/stats').catch(() => null);
+        const statsRes = await fetch(`${currentBaseUrl}/api/automation/stats`).catch(() => null);
         if (!statsRes || !statsRes.ok) return;
         const statsData = await statsRes.json().catch(() => null);
         if (!statsData) return;
@@ -531,12 +587,12 @@ export default function DashboardPage() {
     fetchData();
     const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, apiBaseUrl, isVercel, isLocalServerOnline]);
 
   // 3. Fetch recruiter leads from Feed Scouter JSON file
   const fetchLeads = async () => {
     try {
-      const res = await fetch('/api/automation/leads').catch(() => null);
+      const res = await fetch(`${apiBaseUrl}/api/automation/leads`).catch(() => null);
       if (!res || !res.ok) return;
       const data = await res.json().catch(() => null);
       if (!data) return;
@@ -558,7 +614,7 @@ export default function DashboardPage() {
     return () => {
       if (leadsInterval) clearInterval(leadsInterval);
     };
-  }, [isAuthenticated, isRunning]);
+  }, [isAuthenticated, isRunning, apiBaseUrl]);
 
   // 4. Session runtime local timer (ticks second-by-second for responsive UI feel)
   useEffect(() => {
@@ -592,7 +648,7 @@ export default function DashboardPage() {
       eventSourceRef.current.close();
     }
 
-    const source = new EventSource('/api/automation/logs');
+    const source = new EventSource(`${apiBaseUrl}/api/automation/logs`);
     eventSourceRef.current = source;
 
     source.onmessage = (event) => {
@@ -684,7 +740,7 @@ export default function DashboardPage() {
     return () => {
       eventSourceRef.current?.close();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, apiBaseUrl]);
 
   const handleStart = async () => {
     setLoading(true);
@@ -700,7 +756,7 @@ export default function DashboardPage() {
         .filter(([_, enabled]) => enabled)
         .map(([name]) => name.toLowerCase());
 
-      const res = await fetch('/api/automation/start', {
+      const res = await fetch(`${apiBaseUrl}/api/automation/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -723,7 +779,7 @@ export default function DashboardPage() {
   const handleStop = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/automation/stop', { method: 'POST' });
+      const res = await fetch(`${apiBaseUrl}/api/automation/stop`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         setIsRunning(false);
@@ -739,7 +795,7 @@ export default function DashboardPage() {
     if (!confirm('Are you sure you want to clear all automation history?')) return;
     setIsClearingHistory(true);
     try {
-      const res = await fetch('/api/automation/stats', { method: 'DELETE' });
+      const res = await fetch(`${apiBaseUrl}/api/automation/stats`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setSessionHistory([]);
@@ -761,7 +817,7 @@ export default function DashboardPage() {
     if (!confirm('Are you sure you want to clear all collected leads?')) return;
     setIsClearingLeads(true);
     try {
-      const res = await fetch('/api/automation/leads', { method: 'DELETE' });
+      const res = await fetch(`${apiBaseUrl}/api/automation/leads`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setLeads([]);
@@ -829,28 +885,48 @@ export default function DashboardPage() {
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-4 relative z-10">
 
         {isVercel && (
-          <div className="backdrop-blur-xl bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
-            <div className="flex items-center space-x-3">
-              <span className="text-xl">⚠️</span>
-              <div>
-                <h4 className="text-xs font-bold text-slate-205">Cloud Environment (Vercel) Detected</h4>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  Browser automation requires a local Chrome browser and access to local user cookies. The agent **cannot start on Vercel**. Please run the dashboard locally at <strong className="text-indigo-400">http://localhost:3000</strong> to start the agent.
-                </p>
+          isLocalServerOnline ? (
+            <div className="backdrop-blur-xl bg-emerald-950/20 border border-emerald-500/25 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
+              <div className="flex items-center space-x-3">
+                <span className="text-xl">🟢</span>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-200">Connected to Local Automation Server</h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    The cockpit is running from Vercel but communicating directly with your local machine at <strong className="text-emerald-400">http://localhost:3000</strong>. You can control the agent, edit config, and view logs in real-time.
+                  </p>
+                </div>
+              </div>
+              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-500/20 flex-shrink-0 flex items-center gap-1.5 select-none">
+                <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Active Local Link</span>
               </div>
             </div>
-            <a 
-              href="http://localhost:3000" 
-              target="_blank" 
-              rel="noreferrer" 
-              className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02]"
-            >
-              <span>Go to Localhost:3000</span>
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          </div>
+          ) : (
+            <div className="backdrop-blur-xl bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
+              <div className="flex items-center space-x-3">
+                <span className="text-xl">⚠️</span>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-205">Cloud Environment (Vercel) Detected</h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Browser automation requires a local Chrome browser and access to local user cookies. The agent **cannot start on Vercel**. Please run the dashboard locally at <strong className="text-indigo-400">http://localhost:3000</strong> to start the agent.
+                  </p>
+                </div>
+              </div>
+              <a 
+                href="http://localhost:3000" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02]"
+              >
+                <span>Go to Localhost:3000</span>
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
+          )
         )}
 
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 overflow-hidden">
@@ -867,15 +943,15 @@ export default function DashboardPage() {
                 {!isRunning ? (
                   <button
                     onClick={handleStart}
-                    disabled={loading || isVercel}
+                    disabled={loading || (isVercel && !isLocalServerOnline)}
                     className={`w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                      isVercel
+                      isVercel && !isLocalServerOnline
                         ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed shadow-none'
                         : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-600/15 hover:shadow-emerald-600/30 active:scale-[0.98] disabled:opacity-50'
                     }`}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {isVercel ? (
+                      {isVercel && !isLocalServerOnline ? (
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 005.636 5.636" />
                       ) : (
                         <>
@@ -884,7 +960,7 @@ export default function DashboardPage() {
                         </>
                       )}
                     </svg>
-                    <span>{isVercel ? 'Disabled on Vercel' : 'Start Auto-Apply'}</span>
+                    <span>{isVercel && !isLocalServerOnline ? 'Disabled on Vercel' : 'Start Auto-Apply'}</span>
                   </button>
               ) : (
                 <button
