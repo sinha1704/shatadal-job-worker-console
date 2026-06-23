@@ -1455,6 +1455,7 @@ Candidate Profile:
 Match Criteria:
 - YES: The job description requires React, Next.js, TypeScript, general Frontend, Angular, UI development, React Native, or Full-Stack React development.
 - YES: The required experience is in the range of 1 to 8 years (e.g. 2 years, 3 years, 5 years, or up to 7-8 years).
+- YES: If the post is very short, or does not specify the required years of experience, assume it is acceptable and return YES (unless it is for a Principal/Lead/Architect role demanding 9+ years).
 - NO: The job requires MORE than 8 years of experience (e.g., 9+, 10+, 12+ years of experience, or Principal/Lead/Architect roles demanding 9+ years).
 - NO: The job is exclusively backend (e.g. Java Spring Boot, Django, Python with no frontend mention), DevOps, QA/testing, sales, recruitment, or non-technical.
 
@@ -1464,7 +1465,7 @@ ${postText}
 """
 
 Instructions:
-Evaluate the job post and respond with "YES" if it meets the 30-45% matching threshold AND requires 8 years of experience or less.
+Evaluate the job post and respond with "YES" if it meets the 30-45% matching threshold AND (requires 8 years of experience or less OR does not specify experience).
 Otherwise, respond with "NO".
 Output ONLY "YES" or "NO". Do not include any explanation or extra text.`;
 
@@ -1863,7 +1864,7 @@ async function runLinkedInFeedScouter(page: any) {
     console.log('[LinkedIn Feed Scouter] Finding and expanding all "see more" buttons in parallel inside feed updates...');
     const expandedCount = await page.evaluate(() => {
       // Query only post elements
-      const posts = Array.from(document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="urn:li:activity:"], [class*="feed-shared-update-v2"]'));
+      const posts = Array.from(document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="activity:"], [data-urn*="fs_updateV2:"], .reusable-search__result-container, [data-testid="search-activity-card"], [class*="feed-shared-update"]'));
       let count = 0;
       
       posts.forEach((post) => {
@@ -1898,10 +1899,9 @@ async function runLinkedInFeedScouter(page: any) {
     console.log(`[LinkedIn Feed Scouter] Expanded ${expandedCount} see-more buttons in parallel.`);
     await page.waitForTimeout(300); // single shorter wait for parallel layout update
 
-    // 4. Evaluate all post cards dynamically in the browser context using stable testing attributes
     const postsData = await page.evaluate(() => {
       const data: any[] = [];
-      const articles = document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="urn:li:activity:"], [class*="feed-shared-update-v2"]');
+      const articles = document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="activity:"], [data-urn*="fs_updateV2:"], .reusable-search__result-container, [data-testid="search-activity-card"], [class*="feed-shared-update"]');
       
       articles.forEach((card, index) => {
         // Find text container inside the post card
