@@ -7,7 +7,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: 'Automation agent cannot run on Vercel. Browser automation requires a local Chrome browser and active user session. Please run this dashboard locally at http://localhost:3000 to start the agent.'
+          message: 'Automation execution cannot be run directly on the cloud server. The execution core requires local browser synchronization. Please launch the execution node locally on your host device to initiate automation.'
         },
         { status: 400 }
       );

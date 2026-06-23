@@ -887,30 +887,36 @@ export default function DashboardPage() {
         {isVercel && (
           isLocalServerOnline ? (
             <div className="backdrop-blur-xl bg-emerald-950/20 border border-emerald-500/25 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
-              <div className="flex items-center space-x-3">
-                <span className="text-xl">🟢</span>
+              <div className="flex items-center space-x-3.5">
+                <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
+                  <span className="absolute w-6 h-6 rounded-full border-2 border-emerald-500/20 border-t-emerald-500 animate-spin" />
+                  <span className="absolute w-4 h-4 rounded-full bg-emerald-500/25 animate-ping" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_12px_#10b981]" />
+                </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-200">Connected to Local Automation Server</h4>
+                  <h4 className="text-xs font-bold text-slate-200">Outbound Execution Core Linked</h4>
                   <p className="text-[10px] text-slate-400 mt-0.5">
-                    The cockpit is running from Vercel but communicating directly with your local machine at <strong className="text-emerald-400">http://localhost:3000</strong>. You can control the agent, edit config, and view logs in real-time.
+                    The background execution engine is synchronized with this control deck. System is fully operational and ready to process automated job searches, direct applications, and outreach dispatches.
                   </p>
                 </div>
               </div>
-              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-500/20 flex-shrink-0 flex items-center gap-1.5 select-none">
-                <svg className="w-3.5 h-3.5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>Active Local Link</span>
+              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-500/20 flex-shrink-0 flex items-center gap-1.5 select-none">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Execution Link Active</span>
               </div>
             </div>
           ) : (
             <div className="backdrop-blur-xl bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
-              <div className="flex items-center space-x-3">
-                <span className="text-xl">⚠️</span>
+              <div className="flex items-center space-x-3.5">
+                <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
+                  <span className="absolute w-6 h-6 rounded-full border border-indigo-500/10" />
+                  <span className="absolute w-4 h-4 rounded-full bg-indigo-500/10 animate-pulse" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500/30" />
+                </div>
                 <div>
-                  <h4 className="text-xs font-bold text-slate-205">Cloud Environment (Vercel) Detected</h4>
+                  <h4 className="text-xs font-bold text-slate-205">Standby Mode — Control Core Offline</h4>
                   <p className="text-[10px] text-slate-400 mt-0.5">
-                    Browser automation requires a local Chrome browser and access to local user cookies. The agent **cannot start on Vercel**. Please run the dashboard locally at <strong className="text-indigo-400">http://localhost:3000</strong> to start the agent.
+                    The background execution core is currently disconnected. Synchronize this control cockpit with your local agent core to enable live job searches, auto-apply dispatches, and real-time logging.
                   </p>
                 </div>
               </div>
@@ -918,11 +924,11 @@ export default function DashboardPage() {
                 href="http://localhost:3000" 
                 target="_blank" 
                 rel="noreferrer" 
-                className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02]"
+                className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3.5 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02] active:scale-[0.98]"
               >
-                <span>Go to Localhost:3000</span>
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                <span>Synchronize Core</span>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
               </a>
             </div>
@@ -952,7 +958,7 @@ export default function DashboardPage() {
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       {isVercel && !isLocalServerOnline ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 005.636 5.636" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                       ) : (
                         <>
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -960,7 +966,7 @@ export default function DashboardPage() {
                         </>
                       )}
                     </svg>
-                    <span>{isVercel && !isLocalServerOnline ? 'Disabled on Vercel' : 'Start Auto-Apply'}</span>
+                    <span>{isVercel && !isLocalServerOnline ? 'Core Disconnected' : 'Start Auto-Apply'}</span>
                   </button>
               ) : (
                 <button
