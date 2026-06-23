@@ -1861,38 +1861,19 @@ async function runLinkedInFeedScouter(page: any) {
     await dismissLinkedInPostApplyModal(page);
 
     // 3. Find and click all visible "...see more" buttons in parallel ONLY inside feed post containers to prevent widget redirects
-    console.log('[LinkedIn Feed Scouter] Finding and expanding all "see more" buttons in parallel inside feed updates...');
+    console.log('[LinkedIn Feed Scouter] Finding and expanding all "see more" buttons in parallel inside updates...');
     const expandedCount = await page.evaluate(() => {
-      // Query only post elements
-      const posts = Array.from(document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="activity:"], [data-urn*="fs_updateV2:"], .reusable-search__result-container, [data-testid="search-activity-card"], [class*="feed-shared-update"]'));
+      const seeMoreButtons = Array.from(document.querySelectorAll('[data-testid="expandable-text-button"], button[class*="see-more" i], span[class*="see-more" i], button[class*="show-more" i]'));
       let count = 0;
-      
-      posts.forEach((post) => {
-        const elements = Array.from(post.querySelectorAll('button, span, [class*="see-more" i], [class*="show-more" i]'));
-        elements.forEach((el: any) => {
-          const rect = el.getBoundingClientRect();
-          const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none' && window.getComputedStyle(el).visibility !== 'hidden';
-          if (!isVisible) return;
-
-          // Prevent clicking links that navigate the tab away
-          if (el.tagName === 'A' || el.getAttribute('href')) return;
-
-          const txt = (el.textContent || '').trim().toLowerCase();
-          const className = typeof el.className === 'string' ? el.className.toLowerCase() : '';
-          
-          const isSeeMore = txt === '... more' || 
-                            txt === 'see more' || 
-                            txt === '...see more' || 
-                            className.includes('see-more') || 
-                            className.includes('show-more');
-                            
-          if (isSeeMore) {
-            try {
-              el.click();
-              count++;
-            } catch (e) {}
-          }
-        });
+      seeMoreButtons.forEach((el: any) => {
+        const rect = el.getBoundingClientRect();
+        const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none' && window.getComputedStyle(el).visibility !== 'hidden';
+        if (isVisible) {
+          try {
+            el.click();
+            count++;
+          } catch (e) {}
+        }
       });
       return count;
     }).catch(() => 0);
@@ -1901,13 +1882,15 @@ async function runLinkedInFeedScouter(page: any) {
 
     const postsData = await page.evaluate(() => {
       const data: any[] = [];
-      const articles = document.querySelectorAll('article, .feed-shared-update-v2, [data-activity-urn], [data-urn*="activity:"], [data-urn*="fs_updateV2:"], .reusable-search__result-container, [data-testid="search-activity-card"], [class*="feed-shared-update"]');
+      const textContainers = Array.from(document.querySelectorAll('[data-testid="expandable-text-box"], .feed-shared-update-v2__description, .update-components-text, div[class*="feed-shared-inline-show-more-text"], .feed-shared-text-view'));
       
-      articles.forEach((card, index) => {
-        // Find text container inside the post card
-        const textContainer = card.querySelector('.feed-shared-update-v2__description, .update-components-text, div[class*="feed-shared-inline-show-more-text"], [data-testid="expandable-text-box"], .feed-shared-text-view');
-        const postText = textContainer ? (textContainer as any).innerText || '' : (card as any).innerText || '';
+      textContainers.forEach((textEl: any, index) => {
+        const postText = textEl.innerText || '';
         if (!postText.trim()) return;
+        
+        // Find the wrapping card container by traversing up the DOM
+        const card = textEl.closest('li, [role="listitem"], article, .feed-shared-update-v2, [data-activity-urn], [data-urn]') || textEl.parentElement;
+        if (!card) return;
         
         const authorLink = card.querySelector('a[href*="/in/"], a[href*="/company/"]');
         let authorProfile = '';
