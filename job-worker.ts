@@ -1794,35 +1794,62 @@ async function runLinkedInFeedScouter(page: any) {
   // Dismiss any blocking modals/popups right away (e.g. premium overlays)
   await dismissLinkedInPostApplyModal(page);
 
+  // Search queries to loop through dynamically
+  const searchQueries = [
+    'hiring React js',
+    'hiring Next js',
+    'hiring Frontend developer',
+    'hiring Senior Frontend developer',
+    'hiring Full Stack Developer',
+    'hiring UI developer'
+  ];
+
+  let currentQueryIndex = 0;
+  let lastQuerySwitchTime = 0;
+  // Change search terms every 90 seconds (1.5 minutes) to cover all of them within 10 minutes run
+  const QUERY_DURATION = 90 * 1000;
+
+  // Track emails processed in this run to prevent duplicates
+  const processedEmailsThisRun = new Set<string>();
+
   const duration = 10 * 60 * 1000; // 10 minutes in ms
   const startTime = Date.now();
   let loopCount = 0;
 
-  console.log(`[LinkedIn Feed Scouter] Will run continuous scouting for 10 minutes.`);
+  console.log(`[LinkedIn Feed Scouter] Will run continuous search-based scouting for 10 minutes.`);
 
   while (Date.now() - startTime < duration) {
     loopCount++;
     const minutesLeft = Math.ceil((duration - (Date.now() - startTime)) / 60000);
     console.log(`[LinkedIn Feed Scouter] Loop #${loopCount} | Time remaining: ~${minutesLeft} minute(s)`);
 
-    // URL Guard: Detect if we have navigated away from the feed page
+    // URL & Search Query Switch Check
     const currentUrl = page.url();
-    if (!currentUrl.includes('/feed')) {
-      console.log(`[LinkedIn Feed Scouter] Detected navigation away from Feed page to: ${currentUrl}. Navigating back to Feed...`);
-      await updateAgentStatus(page, 'Redirecting back to Feed');
+    const isSearchPage = currentUrl.includes('/search/results/content');
+    const timeSinceSwitch = Date.now() - lastQuerySwitchTime;
+
+    if (!isSearchPage || timeSinceSwitch >= QUERY_DURATION) {
+      const query = searchQueries[currentQueryIndex];
+      console.log(`[LinkedIn Feed Scouter] Navigating to search query: "${query}" (Loop #${loopCount}, Index: ${currentQueryIndex})...`);
+      await updateAgentStatus(page, `Searching: ${query}`);
+      
       try {
-        await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
+        const searchUrl = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(query)}&sortBy=%22date_posted%22`;
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+        lastQuerySwitchTime = Date.now();
+        currentQueryIndex = (currentQueryIndex + 1) % searchQueries.length;
       } catch (err: any) {
-        console.warn(`[LinkedIn Feed Scouter] Warning during redirect to Feed: ${err.message}`);
+        console.warn(`[LinkedIn Feed Scouter] Warning during search navigation: ${err.message}`);
       }
-      await randomDelay(2000, 3500);
+      // Give page some extra time to load search results
+      await randomDelay(3000, 5000);
       continue;
     }
 
-    await updateAgentStatus(page, `Scouting Feed (~${minutesLeft}m left)`);
+    await updateAgentStatus(page, `Scouting posts (~${minutesLeft}m left)`);
 
     // 1. Scroll down a bit to trigger loading more posts
-    console.log('[LinkedIn Feed Scouter] Scrolling home feed to load more posts...');
+    console.log('[LinkedIn Feed Scouter] Scrolling search results to load more posts...');
     for (let s = 0; s < 2; s++) {
       await dismissLinkedInPostApplyModal(page);
       await humanScroll(page, 1200);
@@ -2065,8 +2092,15 @@ async function runLinkedInFeedScouter(page: any) {
           }
 
           for (const email of emailsMatched) {
+            const emailClean = email.trim().toLowerCase();
+            if (processedEmailsThisRun.has(emailClean)) {
+              console.log(`[LinkedIn Feed Scouter] Memory check: Duplicate lead ignored in this run: ${emailClean}`);
+              continue;
+            }
+            processedEmailsThisRun.add(emailClean);
+
             const lead: FeedLead = {
-              email: email.trim().toLowerCase(),
+              email: emailClean,
               postText: postText.substring(0, 1000),
               authorName: authorName || 'Recruiter',
               authorProfile: profileUrl || '',
