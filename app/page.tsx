@@ -179,6 +179,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isVercel, setIsVercel] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [activePortal, setActivePortal] = useState<string>('LinkedIn');
   const [loading, setLoading] = useState(false);
@@ -251,13 +252,19 @@ export default function DashboardPage() {
     location: 'Kolkata, West Bengal'
   };
 
-  // 1. Route Guard check authentication
+  // 1. Route Guard check authentication and environment detection
   useEffect(() => {
     const auth = localStorage.getItem('isAuthenticated') === 'true';
     if (!auth) {
       router.push('/login');
     } else {
       setIsAuthenticated(true);
+    }
+    if (typeof window !== 'undefined') {
+      setIsVercel(
+        window.location.hostname.includes('vercel.app') || 
+        window.location.hostname.includes('shatadalpersonalassistent')
+      );
     }
   }, [router]);
 
@@ -479,6 +486,13 @@ export default function DashboardPage() {
         const statusData = await statusRes.json().catch(() => null);
         if (!statusData) return;
         setIsRunning(statusData.isRunning);
+        if (statusData.isVercel !== undefined) {
+          setIsVercel(
+            statusData.isVercel || 
+            window.location.hostname.includes('vercel.app') || 
+            window.location.hostname.includes('shatadalpersonalassistent')
+          );
+        }
 
         // Fetch stats
         const statsRes = await fetch('/api/automation/stats').catch(() => null);
@@ -812,29 +826,66 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Dashboard Space */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden p-4 gap-4 relative z-10">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4 gap-4 relative z-10">
 
-        {/* Left Control and Portal Cards */}
-        <div className="w-full lg:w-80 flex flex-col gap-4 flex-shrink-0 overflow-hidden">
+        {isVercel && (
+          <div className="backdrop-blur-xl bg-indigo-950/20 border border-indigo-500/20 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-lg flex-shrink-0 animate-fade-in">
+            <div className="flex items-center space-x-3">
+              <span className="text-xl">⚠️</span>
+              <div>
+                <h4 className="text-xs font-bold text-slate-205">Cloud Environment (Vercel) Detected</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Browser automation requires a local Chrome browser and access to local user cookies. The agent **cannot start on Vercel**. Please run the dashboard locally at <strong className="text-indigo-400">http://localhost:3000</strong> to start the agent.
+                </p>
+              </div>
+            </div>
+            <a 
+              href="http://localhost:3000" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="text-[10px] font-bold text-white bg-indigo-650 hover:bg-indigo-550 px-3 py-1.5 rounded-lg border border-indigo-500/30 transition-all flex-shrink-0 flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-[1.02]"
+            >
+              <span>Go to Localhost:3000</span>
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          </div>
+        )}
 
-          {/* Action Trigger Card */}
-          <div className="backdrop-blur-xl bg-slate-900/40 rounded-xl border border-slate-800/80 p-4 shadow-lg relative overflow-hidden flex-shrink-0">
-            <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Agent Controller</h3>
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 overflow-hidden">
 
-            <div className="flex flex-col gap-3">
-              {!isRunning ? (
-                <button
-                  onClick={handleStart}
-                  disabled={loading}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-sm tracking-wide transition-all shadow-lg shadow-emerald-600/15 hover:shadow-emerald-600/30 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>Start Auto-Apply</span>
-                </button>
+          {/* Left Control and Portal Cards */}
+          <div className="w-full lg:w-80 flex flex-col gap-4 flex-shrink-0 overflow-hidden">
+
+            {/* Action Trigger Card */}
+            <div className="backdrop-blur-xl bg-slate-900/40 rounded-xl border border-slate-800/80 p-4 shadow-lg relative overflow-hidden flex-shrink-0">
+              <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/40 to-transparent" />
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Agent Controller</h3>
+
+              <div className="flex flex-col gap-3">
+                {!isRunning ? (
+                  <button
+                    onClick={handleStart}
+                    disabled={loading || isVercel}
+                    className={`w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      isVercel
+                        ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed shadow-none'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-600/15 hover:shadow-emerald-600/30 active:scale-[0.98] disabled:opacity-50'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {isVercel ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 005.636 5.636" />
+                      ) : (
+                        <>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </>
+                      )}
+                    </svg>
+                    <span>{isVercel ? 'Disabled on Vercel' : 'Start Auto-Apply'}</span>
+                  </button>
               ) : (
                 <button
                   onClick={handleStop}
@@ -1938,6 +1989,8 @@ export default function DashboardPage() {
           </div>
 
         </div>
+
+      </div>
 
       </div>
 
