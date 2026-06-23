@@ -1835,7 +1835,7 @@ async function runLinkedInFeedScouter(page: any) {
       await updateAgentStatus(page, `Searching: ${query}`);
       
       try {
-        const searchUrl = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(query)}&sortBy=%22date_posted%22`;
+        const searchUrl = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(query)}`;
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
         lastQuerySwitchTime = Date.now();
         currentQueryIndex = (currentQueryIndex + 1) % searchQueries.length;
