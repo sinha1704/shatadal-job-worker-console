@@ -861,6 +861,188 @@ async function isNaukriLoggedIn(page: any): Promise<boolean> {
   return false;
 }
 
+function getPortalCredentials() {
+  const credentialsFile = path.join(__dirname, 'data', 'portal_credentials.json');
+  if (fs.existsSync(credentialsFile)) {
+    try {
+      const content = fs.readFileSync(credentialsFile, 'utf-8');
+      return JSON.parse(content);
+    } catch (e) {
+      console.error('[Config] Failed to parse portal credentials:', e);
+    }
+  }
+  return {
+    linkedinEmail: '',
+    linkedinPassword: '',
+    indeedEmail: '',
+    indeedPassword: '',
+    naukriEmail: '',
+    naukriPassword: '',
+    instahyreEmail: '',
+    instahyrePassword: ''
+  };
+}
+
+async function attemptLinkedInLogin(page: any): Promise<boolean> {
+  const creds = getPortalCredentials();
+  if (!creds.linkedinEmail || !creds.linkedinPassword) {
+    console.log('[LinkedIn Auto-Login] No saved credentials found in vault. Cannot auto-login.');
+    return false;
+  }
+  console.log('[LinkedIn Auto-Login] Attempting automated login...');
+  try {
+    await page.goto('https://www.linkedin.com/login', { waitUntil: 'domcontentloaded' });
+    await randomDelay(800, 1500);
+
+    if (await isLinkedInLoggedIn(page)) return true;
+
+    const usernameInput = page.locator('#username');
+    const passwordInput = page.locator('#password');
+    const submitBtn = page.locator('button[type="submit"]');
+
+    if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
+      await humanFill(page, usernameInput, creds.linkedinEmail);
+      await randomDelay(300, 600);
+      await humanFill(page, passwordInput, creds.linkedinPassword);
+      await randomDelay(500, 1000);
+      
+      await updateAgentStatus(page, 'Logging In');
+      await humanClick(page, submitBtn);
+      await randomDelay(3000, 5000);
+
+      const success = await isLinkedInLoggedIn(page);
+      if (success) {
+        console.log('[LinkedIn Auto-Login] Automated login succeeded!');
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.error(`[LinkedIn Auto-Login] Error during auto-login: ${err.message}`);
+  }
+  return false;
+}
+
+async function attemptInstahyreLogin(page: any): Promise<boolean> {
+  const creds = getPortalCredentials();
+  if (!creds.instahyreEmail || !creds.instahyrePassword) {
+    console.log('[Instahyre Auto-Login] No saved credentials found in vault. Cannot auto-login.');
+    return false;
+  }
+  console.log('[Instahyre Auto-Login] Attempting automated login...');
+  try {
+    await page.goto('https://www.instahyre.com/login/', { waitUntil: 'domcontentloaded' });
+    await randomDelay(800, 1500);
+
+    if (await isInstahyreLoggedIn(page)) return true;
+
+    const emailInput = page.locator('#email');
+    const passwordInput = page.locator('#password');
+    const submitBtn = page.locator('button[type="submit"]');
+
+    if (await emailInput.count() > 0 && await passwordInput.count() > 0) {
+      await humanFill(page, emailInput, creds.instahyreEmail);
+      await randomDelay(300, 600);
+      await humanFill(page, passwordInput, creds.instahyrePassword);
+      await randomDelay(500, 1000);
+
+      await updateAgentStatus(page, 'Logging In');
+      await humanClick(page, submitBtn);
+      await randomDelay(3000, 5000);
+
+      const success = await isInstahyreLoggedIn(page);
+      if (success) {
+        console.log('[Instahyre Auto-Login] Automated login succeeded!');
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Instahyre Auto-Login] Error during auto-login: ${err.message}`);
+  }
+  return false;
+}
+
+async function attemptIndeedLogin(page: any): Promise<boolean> {
+  const creds = getPortalCredentials();
+  if (!creds.indeedEmail || !creds.indeedPassword) {
+    console.log('[Indeed Auto-Login] No saved credentials found in vault. Cannot auto-login.');
+    return false;
+  }
+  console.log('[Indeed Auto-Login] Attempting automated login...');
+  try {
+    await page.goto('https://secure.indeed.com/auth', { waitUntil: 'domcontentloaded' });
+    await randomDelay(800, 1500);
+
+    if (await isIndeedLoggedIn(page)) return true;
+
+    const emailInput = page.locator('input[type="email"], input[name="email"], #ifl-InputFormField-3').first();
+    if (await emailInput.count() > 0) {
+      await humanFill(page, emailInput, creds.indeedEmail);
+      await randomDelay(500, 1000);
+      
+      const nextBtn = page.locator('button[type="submit"], button:has-text("Continue")').first();
+      await humanClick(page, nextBtn);
+      await randomDelay(1500, 2500);
+
+      const passwordInput = page.locator('input[type="password"], input[name="password"]').first();
+      if (await passwordInput.count() > 0) {
+        await humanFill(page, passwordInput, creds.indeedPassword);
+        await randomDelay(500, 1000);
+        
+        const signInBtn = page.locator('button[type="submit"], button:has-text("Sign in")').first();
+        await humanClick(page, signInBtn);
+        await randomDelay(3000, 5000);
+
+        if (await isIndeedLoggedIn(page)) {
+          console.log('[Indeed Auto-Login] Automated login succeeded!');
+          return true;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Indeed Auto-Login] Error during auto-login: ${err.message}`);
+  }
+  return false;
+}
+
+async function attemptNaukriLogin(page: any): Promise<boolean> {
+  const creds = getPortalCredentials();
+  if (!creds.naukriEmail || !creds.naukriPassword) {
+    console.log('[Naukri Auto-Login] No saved credentials found in vault. Cannot auto-login.');
+    return false;
+  }
+  console.log('[Naukri Auto-Login] Attempting automated login...');
+  try {
+    await page.goto('https://www.naukri.com/nlogin/login', { waitUntil: 'domcontentloaded' });
+    await randomDelay(800, 1500);
+
+    if (await isNaukriLoggedIn(page)) return true;
+
+    const usernameInput = page.locator('#usernameField');
+    const passwordInput = page.locator('#passwordField');
+    const submitBtn = page.locator('button[type="submit"]');
+
+    if (await usernameInput.count() > 0 && await passwordInput.count() > 0) {
+      await humanFill(page, usernameInput, creds.naukriEmail);
+      await randomDelay(300, 600);
+      await humanFill(page, passwordInput, creds.naukriPassword);
+      await randomDelay(500, 1000);
+
+      await updateAgentStatus(page, 'Logging In');
+      await humanClick(page, submitBtn);
+      await randomDelay(3000, 5000);
+
+      const success = await isNaukriLoggedIn(page);
+      if (success) {
+        console.log('[Naukri Auto-Login] Automated login succeeded!');
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Naukri Auto-Login] Error during auto-login: ${err.message}`);
+  }
+  return false;
+}
+
 // Human-like smooth scrolling with robust scroll-lock bypasses
 const humanScroll = async (page: any, scrollDistance = 400) => {
   try {
@@ -1016,7 +1198,11 @@ async function runLinkedInPipeline(page: any) {
   let loggedIn = await isLinkedInLoggedIn(page);
 
   if (!loggedIn) {
-    console.log('[LinkedIn] User is not logged in! Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
+    const autoLoginSuccess = await attemptLinkedInLogin(page);
+    if (autoLoginSuccess) {
+      loggedIn = true;
+    } else {
+      console.log('[LinkedIn] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
     
     const startTime = Date.now();
     const timeout = 5 * 60 * 1000; // 5 minutes timeout
@@ -1035,6 +1221,7 @@ async function runLinkedInPipeline(page: any) {
       return;
     }
     console.log('[LinkedIn] Logged in successfully!');
+    }
   }
 
   // Scroll through the job list multiple times to load all 25 job cards on the page
@@ -2823,25 +3010,30 @@ async function runInstahyrePipeline(page: any) {
   let loggedIn = await isInstahyreLoggedIn(page);
 
   if (!loggedIn) {
-    console.log('[Instahyre] User is not logged in! Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
-    
-    const startTime = Date.now();
-    const timeout = 5 * 60 * 1000; // 5 minutes timeout
-    
-    while (!loggedIn && Date.now() - startTime < timeout) {
-      if (page.isClosed()) {
-        console.error('[Instahyre] Browser page was closed. Skipping Instahyre...');
+    const autoLoginSuccess = await attemptInstahyreLogin(page);
+    if (autoLoginSuccess) {
+      loggedIn = true;
+    } else {
+      console.log('[Instahyre] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
+      
+      const startTime = Date.now();
+      const timeout = 5 * 60 * 1000; // 5 minutes timeout
+      
+      while (!loggedIn && Date.now() - startTime < timeout) {
+        if (page.isClosed()) {
+          console.error('[Instahyre] Browser page was closed. Skipping Instahyre...');
+          return;
+        }
+        await page.waitForTimeout(2000);
+        loggedIn = await isInstahyreLoggedIn(page);
+      }
+
+      if (!loggedIn) {
+        console.error('[Instahyre] Timeout waiting for login. Skipping Instahyre...');
         return;
       }
-      await page.waitForTimeout(2000);
-      loggedIn = await isInstahyreLoggedIn(page);
-    }
-
-    if (!loggedIn) {
-      console.error('[Instahyre] Timeout waiting for login. Skipping Instahyre...');
-      return;
-    }
-    console.log('[Instahyre] Logged in successfully!');
+      console.log('[Instahyre] Logged in successfully!');
+      }
   }
 
   // Scroll to trigger lazy loading of jobs
@@ -3166,23 +3358,27 @@ async function runIndeedPipeline(page: any) {
     console.warn(`[Indeed] Warning during navigation: ${err.message}`);
   }
   await randomDelay(800, 1500);
-
   let loggedIn = await isIndeedLoggedIn(page);
 
   if (!loggedIn) {
-    console.log('[Indeed] User is not logged in! Waiting for you to log in manually in the open Chrome window if you want to sign in (auto-detecting)...');
-    
-    const startTime = Date.now();
-    const timeout = 3 * 60 * 1000; // 3 minutes timeout
-    
-    while (!loggedIn && Date.now() - startTime < timeout) {
-      if (page.isClosed()) {
-        break;
+    const autoLoginSuccess = await attemptIndeedLogin(page);
+    if (autoLoginSuccess) {
+      loggedIn = true;
+    } else {
+      console.log('[Indeed] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window if you want to sign in (auto-detecting)...');
+      
+      const startTime = Date.now();
+      const timeout = 3 * 60 * 1000; // 3 minutes timeout
+      
+      while (!loggedIn && Date.now() - startTime < timeout) {
+        if (page.isClosed()) {
+          break;
+        }
+        await page.waitForTimeout(2000);
+        loggedIn = await isIndeedLoggedIn(page);
       }
-      await page.waitForTimeout(2000);
-      loggedIn = await isIndeedLoggedIn(page);
-    }
-    console.log('[Indeed] Logged in or continuing...');
+      console.log('[Indeed] Logged in or continuing...');
+      }
   }
 
   // Scroll to load all cards
@@ -3421,26 +3617,31 @@ async function runNaukriPipeline(page: any) {
   // Check login
   let loggedIn = await isNaukriLoggedIn(page);
   if (!loggedIn) {
-    console.log('[Naukri] User is not logged in! Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
-    await updateAgentStatus(page, 'Waiting for Login');
-    
-    const startTime = Date.now();
-    const timeout = 5 * 60 * 1000; // 5 minutes timeout
-    
-    while (!loggedIn && Date.now() - startTime < timeout) {
-      if (page.isClosed()) {
-        console.error('[Naukri] Browser page was closed. Skipping Naukri...');
+    const autoLoginSuccess = await attemptNaukriLogin(page);
+    if (autoLoginSuccess) {
+      loggedIn = true;
+    } else {
+      console.log('[Naukri] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
+      await updateAgentStatus(page, 'Waiting for Login');
+      
+      const startTime = Date.now();
+      const timeout = 5 * 60 * 1000; // 5 minutes timeout
+      
+      while (!loggedIn && Date.now() - startTime < timeout) {
+        if (page.isClosed()) {
+          console.error('[Naukri] Browser page was closed. Skipping Naukri...');
+          return;
+        }
+        await page.waitForTimeout(2000);
+        loggedIn = await isNaukriLoggedIn(page);
+      }
+
+      if (!loggedIn) {
+        console.error('[Naukri] Timeout waiting for login. Skipping Naukri...');
         return;
       }
-      await page.waitForTimeout(2000);
-      loggedIn = await isNaukriLoggedIn(page);
-    }
-
-    if (!loggedIn) {
-      console.error('[Naukri] Timeout waiting for login. Skipping Naukri...');
-      return;
-    }
-    console.log('[Naukri] Logged in successfully!');
+      console.log('[Naukri] Logged in successfully!');
+      }
   }
 
   // Scroll to trigger lazy loading of jobs

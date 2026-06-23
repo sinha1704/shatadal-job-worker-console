@@ -243,6 +243,21 @@ export default function DashboardPage() {
   // Duplicate / already-contacted validation
   const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: string[]; alreadySent: string[] } | null>(null);
 
+  // Credential Vault States
+  const [showCredentialsVault, setShowCredentialsVault] = useState(false);
+  const [loadingVault, setLoadingVault] = useState(false);
+  const [vaultStatus, setVaultStatus] = useState('');
+  const [credentials, setCredentials] = useState({
+    linkedinEmail: '',
+    linkedinPassword: '',
+    indeedEmail: '',
+    indeedPassword: '',
+    naukriEmail: '',
+    naukriPassword: '',
+    instahyreEmail: '',
+    instahyrePassword: ''
+  });
+
   // Profile configuration states to present in settings panel
   const profileDetails = {
     name: 'Shatadal Sundar Sinha',
@@ -319,6 +334,58 @@ export default function DashboardPage() {
     };
     fetchSmtpConfig();
   }, [isAuthenticated, apiBaseUrl]);
+
+  // Fetch Portal Credentials on mount
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const fetchCredentials = async () => {
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/automation/portal-credentials`);
+        if (res.ok) {
+          const data = await res.json();
+          setCredentials({
+            linkedinEmail: data.linkedinEmail || '',
+            linkedinPassword: data.linkedinPassword || '',
+            indeedEmail: data.indeedEmail || '',
+            indeedPassword: data.indeedPassword || '',
+            naukriEmail: data.naukriEmail || '',
+            naukriPassword: data.naukriPassword || '',
+            instahyreEmail: data.instahyreEmail || '',
+            instahyrePassword: data.instahyrePassword || ''
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch portal credentials:', err);
+      }
+    };
+    fetchCredentials();
+  }, [isAuthenticated, apiBaseUrl]);
+
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoadingVault(true);
+    setVaultStatus('');
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/automation/portal-credentials`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(credentials)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setVaultStatus('Vault saved successfully!');
+        setTimeout(() => setVaultStatus(''), 3000);
+      } else {
+        setVaultStatus('Error: ' + data.error);
+      }
+    } catch (err: any) {
+      setVaultStatus('Error: ' + err.message);
+    } finally {
+      setLoadingVault(false);
+    }
+  };
 
   const handleSaveSmtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1158,6 +1225,118 @@ export default function DashboardPage() {
                   <span className="text-indigo-400 font-bold truncate max-w-[120px]">{profileDetails.resume}</span>
                 </div>
               </div>
+            </div>
+
+            {/* Credential Vault Card */}
+            <div className="backdrop-blur-xl bg-slate-900/40 rounded-xl border border-slate-800/80 p-4 shadow-lg flex-shrink-0">
+              <div className="flex items-center justify-between mb-2.5">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Credential Vault</h3>
+                <button
+                  onClick={() => setShowCredentialsVault(!showCredentialsVault)}
+                  className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-all cursor-pointer"
+                >
+                  {showCredentialsVault ? 'Close' : 'Configure'}
+                </button>
+              </div>
+              
+              {showCredentialsVault ? (
+                <form onSubmit={handleSaveCredentials} className="space-y-3.5 text-xs">
+                  {/* LinkedIn */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold text-indigo-400 block">LinkedIn Login</span>
+                    <input
+                      type="text"
+                      value={credentials.linkedinEmail}
+                      onChange={(e) => setCredentials({ ...credentials, linkedinEmail: e.target.value })}
+                      placeholder="Email / Phone / Username"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                    <input
+                      type="password"
+                      value={credentials.linkedinPassword}
+                      onChange={(e) => setCredentials({ ...credentials, linkedinPassword: e.target.value })}
+                      placeholder="Password"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                  </div>
+
+                  {/* Indeed */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
+                    <span className="text-[10px] font-bold text-indigo-400 block">Indeed Login</span>
+                    <input
+                      type="text"
+                      value={credentials.indeedEmail}
+                      onChange={(e) => setCredentials({ ...credentials, indeedEmail: e.target.value })}
+                      placeholder="Email Address"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                    <input
+                      type="password"
+                      value={credentials.indeedPassword}
+                      onChange={(e) => setCredentials({ ...credentials, indeedPassword: e.target.value })}
+                      placeholder="Password"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                  </div>
+
+                  {/* Naukri */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
+                    <span className="text-[10px] font-bold text-indigo-400 block">Naukri Login</span>
+                    <input
+                      type="text"
+                      value={credentials.naukriEmail}
+                      onChange={(e) => setCredentials({ ...credentials, naukriEmail: e.target.value })}
+                      placeholder="Email / Username"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                    <input
+                      type="password"
+                      value={credentials.naukriPassword}
+                      onChange={(e) => setCredentials({ ...credentials, naukriPassword: e.target.value })}
+                      placeholder="Password"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                  </div>
+
+                  {/* Instahyre */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800/40">
+                    <span className="text-[10px] font-bold text-indigo-400 block">Instahyre Login</span>
+                    <input
+                      type="text"
+                      value={credentials.instahyreEmail}
+                      onChange={(e) => setCredentials({ ...credentials, instahyreEmail: e.target.value })}
+                      placeholder="Email Address"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                    <input
+                      type="password"
+                      value={credentials.instahyrePassword}
+                      onChange={(e) => setCredentials({ ...credentials, instahyrePassword: e.target.value })}
+                      placeholder="Password"
+                      className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:border-indigo-500 outline-none placeholder:text-slate-650"
+                    />
+                  </div>
+
+                  <div className="flex gap-1.5 pt-1.5 justify-end">
+                    <button
+                      type="submit"
+                      disabled={loadingVault}
+                      className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shadow cursor-pointer transition-all active:scale-[0.98] disabled:opacity-50"
+                    >
+                      {loadingVault ? 'Saving...' : 'Save Credentials'}
+                    </button>
+                  </div>
+                  {vaultStatus && (
+                    <div className="text-[10px] font-semibold text-center text-emerald-400 bg-emerald-950/20 border border-emerald-500/20 p-2 rounded-lg mt-2">
+                      {vaultStatus}
+                    </div>
+                  )}
+                </form>
+              ) : (
+                <div className="text-[10px] text-slate-400 leading-relaxed">
+                  Store secure local credentials for automated browser logins if a site session expires or requires reconnecting.
+                </div>
+              )}
             </div>
 
             {/* User Session & Sign Out */}
