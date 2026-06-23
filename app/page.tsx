@@ -4,6 +4,177 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getGraphicOutreachTemplate } from './utils/emailTemplates';
 
+// Helper to extract detailed information from raw LinkedIn post text
+function parseLeadPost(lead: any) {
+  const text = lead.postText || '';
+  const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean);
+  
+  // 1. Extract Role Title
+  let roleTitle = '';
+  
+  // Try common headings for roles
+  let openPositionsIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    if (lower.includes('open position') || lower.includes('hiring position') || lower.includes('open role') || lower.includes('we are hiring') || lower.includes('we\'re hiring') || lower.includes('hiring:')) {
+      openPositionsIndex = i;
+      break;
+    }
+  }
+  
+  // Look for lines after "Open Positions" or similar heading that look like roles
+  if (openPositionsIndex !== -1 && openPositionsIndex < lines.length - 1) {
+    for (let j = openPositionsIndex + 1; j < Math.min(lines.length, openPositionsIndex + 4); j++) {
+      const line = lines[j];
+      if (line.match(/^[•🔹✔✅🎨📈💻💼➡️-]\s*(.+)/) || line.includes('Developer') || line.includes('Engineer') || line.includes('Specialist') || line.includes('Manager') || line.includes('Tester')) {
+        roleTitle = line.replace(/^[•🔹✔✅🎨📈💻💼➡️-]\s*/, '').split('(')[0].split('|')[0].split(/[\n,;]+/)[0].trim();
+        break;
+      }
+    }
+  }
+  
+  // If not found, look for "Hiring:" or "We're Hiring" patterns directly
+  if (!roleTitle) {
+    for (const line of lines) {
+      if (line.startsWith('Hiring:') || line.startsWith('Hiring :')) {
+        roleTitle = line.replace(/^Hiring\s*:\s*/i, '').split('|')[0].split('📍')[0].trim();
+        break;
+      }
+      if (line.startsWith('Hiring ') && line.includes(':')) {
+        roleTitle = line.split(':')[1]?.trim().split('|')[0].split('📍')[0].trim();
+        break;
+      }
+      if (line.includes('We\'re Hiring |') || line.includes('We are Hiring |')) {
+        roleTitle = line.split('|')[1]?.trim();
+        break;
+      }
+    }
+  }
+  
+  // Look for any line containing common job titles in the first 5 lines
+  if (!roleTitle) {
+    const commonTitles = [
+      'Frontend Developer', 'React Developer', 'Full Stack Developer', 'Software Engineer', 
+      'QA Tester', 'Manual Testing', 'QA Engineer', 'Business Consultant', 'VBCS Developer', 
+      'Brand Designer', 'Business Development', 'Customer Support', 'Growth Manager', 
+      'Service Engineer', 'Mobile Developer', 'React Native', 'Physical Design', 'Python Developer', 
+      'Laravel Developer', 'PHP Developer'
+    ];
+    for (let i = 0; i < Math.min(lines.length, 5); i++) {
+      const line = lines[i];
+      for (const title of commonTitles) {
+        if (line.toLowerCase().includes(title.toLowerCase())) {
+          roleTitle = title;
+          break;
+        }
+      }
+      if (roleTitle) break;
+    }
+  }
+  
+  // If still not found, check if there's "Open to Work | <role>"
+  if (!roleTitle) {
+    const openToWorkLine = lines.find((l: string) => l.includes('Open to Work'));
+    if (openToWorkLine) {
+      const parts = openToWorkLine.split('|');
+      if (parts.length > 1) {
+        roleTitle = parts[1].trim();
+      }
+    }
+  }
+
+  // Fallback: use first line truncated, or default
+  if (!roleTitle) {
+    if (lines[0] && lines[0].length < 60 && !lines[0].toLowerCase().includes('hiring') && !lines[0].toLowerCase().includes('join')) {
+      roleTitle = lines[0];
+    } else {
+      roleTitle = 'Software Engineer / Developer';
+    }
+  }
+  
+  // Cleanup role title
+  roleTitle = roleTitle.replace(/^[^a-zA-Z0-9]+/, '').replace(/[^a-zA-Z0-9)]+$/, '').trim();
+
+  // 2. Extract Company Name
+  let company = lead.companyName || 'Hiring Manager';
+  
+  if (company === 'Hiring Manager' && lead.authorProfile && lead.authorProfile.includes('/company/')) {
+    const match = lead.authorProfile.match(/\/company\/([^/]+)/);
+    if (match && match[1]) {
+      company = match[1]
+        .split('-')
+        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    }
+  }
+  
+  if (company === 'Hiring Manager') {
+    for (let i = 0; i < Math.min(lines.length, 4); i++) {
+      const line = lines[i];
+      if (line.includes('is Hiring') || line.includes('is hiring') || line.includes('Technologies is expanding') || line.includes('Technologies Pvt Ltd') || line.includes('is looking for')) {
+        const parts = line.split(/is hiring|is Hiring|Technologies is|is looking for/i);
+        if (parts[0] && parts[0].trim().length < 55) {
+          company = parts[0].replace(/^[^a-zA-Z0-9]+/, '').trim();
+          break;
+        }
+      }
+    }
+  }
+
+  if (company === 'Hiring Manager' && lead.email) {
+    const emailDomain = lead.email.split('@')[1];
+    if (emailDomain) {
+      const domainParts = emailDomain.split('.');
+      if (domainParts.length >= 2) {
+        const domainCompany = domainParts[domainParts.length - 2];
+        if (domainCompany && !['gmail', 'yahoo', 'outlook', 'hotmail', 'protonmail', 'com', 'co', 'in', 'net', 'org'].includes(domainCompany.toLowerCase())) {
+          company = domainCompany.charAt(0).toUpperCase() + domainCompany.slice(1);
+        }
+      }
+    }
+  }
+  
+  if (company === 'Hiring Manager' && lead.authorName && !lead.authorName.toLowerCase().includes('recruiter')) {
+    company = lead.authorName.split(',')[0].trim();
+  }
+
+  // 3. Extract Vacancies
+  let vacancies = 'Not Specified';
+  const vacancyMatch = text.match(/\b(\d+)\s*(?:openings|vacancies|positions|posts|open roles)\b/i);
+  if (vacancyMatch) {
+    vacancies = `${vacancyMatch[1]} Position${parseInt(vacancyMatch[1]) > 1 ? 's' : ''}`;
+  } else {
+    if (openPositionsIndex !== -1) {
+      let count = 0;
+      for (let j = openPositionsIndex + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (line.match(/^[•🔹✔✅🎨📈💻💼➡️-]/)) {
+          count++;
+        } else if (line.toLowerCase().includes('location') || line.toLowerCase().includes('send') || line.trim() === '') {
+          break;
+        }
+      }
+      if (count > 0) {
+        vacancies = `${count} Role${count > 1 ? 's' : ''} Open`;
+      }
+    }
+  }
+
+  // 4. Extract Experience
+  let experience = 'Not Specified';
+  const expMatch = text.match(/\b(\d+(?:–|-|\+)?\d*)\s*(?:years?|yrs?)\b/i);
+  if (expMatch) {
+    experience = `${expMatch[1]} Years`;
+  }
+
+  return {
+    roleTitle,
+    company,
+    vacancies,
+    experience
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -37,6 +208,8 @@ export default function DashboardPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'console' | 'leads' | 'history' | 'outreach'>('console');
   const [copiedLeadIndex, setCopiedLeadIndex] = useState<number | null>(null);
+  const [expandedLeads, setExpandedLeads] = useState<Record<number, boolean>>({});
+  const [leadsFilter, setLeadsFilter] = useState<'all' | 'emailed' | 'pending' | 'failed'>('all');
   const [isClearingHistory, setIsClearingHistory] = useState(false);
   const [isClearingLeads, setIsClearingLeads] = useState(false);
 
@@ -61,6 +234,8 @@ export default function DashboardPage() {
   const [showSmtpConfig, setShowSmtpConfig] = useState(false);
   const [outreachError, setOutreachError] = useState('');
   const [smtpStatus, setSmtpStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // Duplicate / already-contacted validation
+  const [duplicateWarning, setDuplicateWarning] = useState<{ duplicates: string[]; alreadySent: string[] } | null>(null);
 
   // Profile configuration states to present in settings panel
   const profileDetails = {
@@ -170,9 +345,31 @@ export default function DashboardPage() {
     }));
   };
 
+  // ── Helper: parse the recipient textarea into a clean email list ──
+  const parsedEmailList = outreachRecipients
+    .split(/[\n,;]+/)
+    .map(e => e.trim())
+    .filter(e => e && e.includes('@'));
+
+  // Set of emails that were already contacted (have emailedAt in leads)
+  const alreadyContactedSet = new Set(
+    leads
+      .filter((l: any) => !!l.emailedAt)
+      .map((l: any) => l.email?.toLowerCase())
+  );
+
+  // Per-email status: 'new' | 'duplicate' | 'already-sent'
+  const getEmailStatus = (email: string, idx: number): 'new' | 'duplicate' | 'already-sent' => {
+    const lower = email.toLowerCase();
+    if (alreadyContactedSet.has(lower)) return 'already-sent';
+    if (parsedEmailList.findIndex(e => e.toLowerCase() === lower) !== idx) return 'duplicate';
+    return 'new';
+  };
+
   const handleSendOutreach = async () => {
     setOutreachError('');
-    
+    setDuplicateWarning(null);
+
     if (!outreachRecipients.trim()) {
       setOutreachError('Please enter at least one recipient email address.');
       return;
@@ -186,27 +383,42 @@ export default function DashboardPage() {
       return;
     }
 
-    const emailList = outreachRecipients
-      .split(/[\n,;]+/)
-      .map(e => e.trim())
-      .filter(e => e && e.includes('@'));
-
-    if (emailList.length === 0) {
+    if (parsedEmailList.length === 0) {
       setOutreachError('Please enter valid email addresses.');
       return;
     }
 
+    // ── Duplicate + Already-Sent Validation ──────────────────────────
+    const seen = new Set<string>();
+    const inListDuplicates: string[] = [];
+    const alreadySentList: string[] = [];
+
+    parsedEmailList.forEach(email => {
+      const lower = email.toLowerCase();
+      if (alreadyContactedSet.has(lower)) {
+        if (!alreadySentList.includes(email)) alreadySentList.push(email);
+      }
+      if (seen.has(lower)) {
+        if (!inListDuplicates.includes(email)) inListDuplicates.push(email);
+      }
+      seen.add(lower);
+    });
+
+    if (inListDuplicates.length > 0 || alreadySentList.length > 0) {
+      setDuplicateWarning({ duplicates: inListDuplicates, alreadySent: alreadySentList });
+      return; // Block sending — user must resolve
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     setIsSendingEmails(true);
-    setOutreachLogs([`Starting outreach execution to ${emailList.length} recipient(s)...`]);
+    setOutreachLogs([`🚀 Starting outreach to ${parsedEmailList.length} recipient(s)...`]);
 
     try {
       const res = await fetch('/api/automation/send-email', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipients: emailList,
+          recipients: parsedEmailList,
           subject: outreachSubject,
           messageBody: outreachMessage,
           smtpConfig: smtpConfig
@@ -214,27 +426,39 @@ export default function DashboardPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Server responded with an error');
-      }
+      if (!res.ok) throw new Error(data.error || 'Server responded with an error');
 
-      const newLogs = [];
+      const newLogs: string[] = [];
       newLogs.push(`Outreach complete!`);
-      newLogs.push(`Successfully sent: ${data.sentCount}`);
-      newLogs.push(`Failed: ${data.failedCount}`);
+      newLogs.push(`✅ Successfully sent: ${data.sentCount}`);
+      if (data.failedCount > 0) newLogs.push(`❌ Failed: ${data.failedCount}`);
 
       if (data.results && data.results.length > 0) {
-        data.results.forEach((res: any) => {
-          if (res.success) {
-            newLogs.push(`✅ [SUCCESS] Sent to ${res.email}`);
+        for (const r of data.results) {
+          if (r.success) {
+            newLogs.push(`✅ [SUCCESS] ${r.email}`);
+            // Mark this lead as contacted in feed_leads.json
+            await fetch('/api/automation/leads', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: r.email, subject: outreachSubject })
+            });
           } else {
-            newLogs.push(`❌ [FAILED] Sent to ${res.email}: ${res.error}`);
+            newLogs.push(`❌ [FAILED] ${r.email}: ${r.error}`);
+            // Mark this lead as outreach failed in feed_leads.json
+            await fetch('/api/automation/leads', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: r.email, failed: true, error: r.error })
+            });
           }
-        });
+        }
       }
       setOutreachLogs(newLogs);
+      // Refresh leads so badges update immediately
+      await fetchLeads();
     } catch (err: any) {
-      setOutreachLogs(prev => [...prev, `❌ [ERROR] Email dispatch failed: ${err.message}`]);
+      setOutreachLogs(prev => [...prev, `❌ [ERROR] Dispatch failed: ${err.message}`]);
     } finally {
       setIsSendingEmails(false);
     }
@@ -247,13 +471,17 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         // Fetch status
-        const statusRes = await fetch('/api/automation/status');
-        const statusData = await statusRes.json();
+        const statusRes = await fetch('/api/automation/status').catch(() => null);
+        if (!statusRes || !statusRes.ok) return;
+        const statusData = await statusRes.json().catch(() => null);
+        if (!statusData) return;
         setIsRunning(statusData.isRunning);
 
         // Fetch stats
-        const statsRes = await fetch('/api/automation/stats');
-        const statsData = await statsRes.json();
+        const statsRes = await fetch('/api/automation/stats').catch(() => null);
+        if (!statsRes || !statsRes.ok) return;
+        const statsData = await statsRes.json().catch(() => null);
+        if (!statsData) return;
         
         // Update live stats from persistent server state
         if (statusData.isRunning && statsData.currentSession) {
@@ -289,8 +517,10 @@ export default function DashboardPage() {
   // 3. Fetch recruiter leads from Feed Scouter JSON file
   const fetchLeads = async () => {
     try {
-      const res = await fetch('/api/automation/leads');
-      const data = await res.json();
+      const res = await fetch('/api/automation/leads').catch(() => null);
+      if (!res || !res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (!data) return;
       setLeads(data.leads || []);
     } catch (err) {
       console.error('Failed to fetch leads:', err);
@@ -614,11 +844,11 @@ export default function DashboardPage() {
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Job Portals</h3>
               <div className="flex flex-col gap-2.5 flex-1">
                 {[
-                  { name: 'LinkedIn', icon: '👤', status: isRunning && activePortal === 'LinkedIn' ? 'active' : 'idle', url: 'https://linkedin.com' },
-                  { name: 'Indeed', icon: '🔍', status: isRunning && activePortal === 'Indeed' ? 'active' : 'idle', url: 'https://indeed.com' },
-                  { name: 'Naukri', icon: '💼', status: isRunning && activePortal === 'Naukri' ? 'active' : 'idle', url: 'https://naukri.com' },
-                  { name: 'Instahyre', icon: '⚡', status: isRunning && activePortal === 'Instahyre' ? 'active' : 'idle', url: 'https://instahyre.com' },
-                  { name: 'Feed', icon: '✉️', status: isRunning && activePortal === 'Feed' ? 'active' : 'idle', url: 'LinkedIn Feed Scouter' }
+                  { name: 'LinkedIn', displayName: 'LinkedIn Job Apply', icon: '👤', status: isRunning && activePortal === 'LinkedIn' ? 'active' : 'idle', url: 'https://linkedin.com/jobs' },
+                  { name: 'Indeed', displayName: 'Indeed Job Apply', icon: '🔍', status: isRunning && activePortal === 'Indeed' ? 'active' : 'idle', url: 'https://indeed.com' },
+                  { name: 'Naukri', displayName: 'Naukri Job Apply', icon: '💼', status: isRunning && activePortal === 'Naukri' ? 'active' : 'idle', url: 'https://naukri.com' },
+                  { name: 'Instahyre', displayName: 'Instahyre Job Apply', icon: '⚡', status: isRunning && activePortal === 'Instahyre' ? 'active' : 'idle', url: 'https://instahyre.com' },
+                  { name: 'Feed', displayName: 'LinkedIn Feed Data Collector', icon: '✉️', status: isRunning && activePortal === 'Feed' ? 'active' : 'idle', url: 'LinkedIn Feed Scouter' }
                 ].map((portal) => (
                   <div
                     key={portal.name}
@@ -671,7 +901,7 @@ export default function DashboardPage() {
                     <div className="flex items-center space-x-3 overflow-hidden">
                       <span className="text-lg select-none">{portal.icon}</span>
                       <div className="overflow-hidden">
-                        <h4 className="text-xs font-bold text-slate-200">{portal.name}</h4>
+                        <h4 className="text-xs font-bold text-slate-200">{portal.displayName || portal.name}</h4>
                         <p className="text-[9px] text-slate-500 truncate mt-0.5">{portal.url}</p>
                       </div>
                     </div>
@@ -905,87 +1135,251 @@ export default function DashboardPage() {
                 {leads.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-600 select-none py-16">
                     <span className="text-3xl mb-3">📬</span>
-                    <span className="text-xs font-semibold">No recruiter leads collected yet.</span>
-                    <span className="text-[10px] text-slate-500 mt-1 max-w-xs text-center">
-                      The LinkedIn Feed Scouter runs dynamically after a LinkedIn run, crawling the home feed to extract direct emails of hiring managers.
-                    </span>
+                    <span className="text-xs font-semibold">No recruitment leads collected yet. Run the scouter first!</span>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {leads.map((lead, idx) => (
-                      <div key={idx} className="glass-card bg-slate-900/50 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-indigo-500/20 transition-all shadow-sm">
-                        <div>
-                          {/* Header info */}
-                          <div className="flex items-start justify-between gap-2 border-b border-slate-800/40 pb-2 mb-2">
-                            <div className="overflow-hidden">
-                              {lead.authorProfile ? (
-                                <a
-                                  href={lead.authorProfile}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-bold text-slate-200 hover:text-indigo-400 hover:underline flex items-center gap-1"
+                  (() => {
+                    const filteredLeads = leads.filter((lead: any) => {
+                      if (leadsFilter === 'emailed') return !!lead.emailedAt;
+                      if (leadsFilter === 'pending') return !lead.emailedAt && !lead.outreachFailed;
+                      if (leadsFilter === 'failed') return !!lead.outreachFailed;
+                      return true;
+                    });
+
+                    return (
+                      <div className="space-y-4">
+                        {/* Stats summary strip */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/15 p-3 rounded-2xl">
+                          <div
+                            onClick={() => setLeadsFilter('all')}
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
+                              leadsFilter === 'all'
+                                ? 'bg-indigo-600/15 ring-1 ring-indigo-500/20 shadow-md'
+                                : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider block">Leads Collected</span>
+                            <span className="text-sm font-black text-indigo-400 mt-0.5 block font-mono">{leads.length}</span>
+                          </div>
+                          <div
+                            onClick={() => setLeadsFilter('emailed')}
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
+                              leadsFilter === 'emailed'
+                                ? 'bg-emerald-650/15 ring-1 ring-emerald-500/20 shadow-md'
+                                : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider block">Emailed Managers</span>
+                            <span className="text-sm font-black text-emerald-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.emailedAt).length}</span>
+                          </div>
+                          <div
+                            onClick={() => setLeadsFilter('pending')}
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
+                              leadsFilter === 'pending'
+                                ? 'bg-indigo-650/15 ring-1 ring-indigo-450/20 shadow-md'
+                                : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider block">Pending Outreach</span>
+                            <span className="text-sm font-black text-indigo-300 mt-0.5 block font-mono">{leads.filter((l: any) => !l.emailedAt && !l.outreachFailed).length}</span>
+                          </div>
+                          <div
+                            onClick={() => setLeadsFilter('failed')}
+                            className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${
+                              leadsFilter === 'failed'
+                                ? 'bg-rose-650/15 ring-1 ring-rose-500/20 shadow-md'
+                                : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="text-[9px] font-extrabold uppercase tracking-wider block">Failed Outreach</span>
+                            <span className="text-sm font-black text-rose-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.outreachFailed).length}</span>
+                          </div>
+                        </div>
+
+                        {filteredLeads.length === 0 ? (
+                          <div className="bg-slate-900/10 border border-dashed border-slate-900 p-12 text-center rounded-2xl text-slate-500">
+                            <span className="text-xs font-semibold block">No leads match the active filter.</span>
+                            <span className="text-[10px] text-slate-600 mt-1 block">Try selecting another status tab above.</span>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                            {filteredLeads.map((lead: any, idx: number) => {
+                              const parsed = parseLeadPost(lead);
+                              return (
+                                <div
+                                  key={idx}
+                                  className="bg-slate-900/30 border border-slate-850/35 hover:border-indigo-500/15 rounded-2xl p-4 flex flex-col justify-between hover:bg-slate-900/40 transition-all duration-300 shadow-sm relative overflow-hidden group"
                                 >
-                                  <span>{lead.authorName || 'Recruiter'}</span>
-                                  <svg className="w-2.5 h-2.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                  </svg>
-                                </a>
-                              ) : (
-                                <span className="text-xs font-bold text-slate-200">{lead.authorName || 'Recruiter'}</span>
-                              )}
-                              <p className="text-[9px] text-slate-500 truncate mt-0.5" title={lead.companyName}>{lead.companyName || 'Hiring Manager'}</p>
-                            </div>
-                            <span className="text-[8px] bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex-shrink-0">
-                              {lead.jobType}
-                            </span>
+                                  <div>
+                                    {/* Card Header info */}
+                                    <div className="flex items-center justify-between gap-2 mb-3">
+                                      <div className="flex items-center gap-2.5 overflow-hidden">
+                                        <div className="w-8 h-8 rounded-lg bg-indigo-650/10 border border-indigo-500/20 flex items-center justify-center flex-shrink-0 text-indigo-400 font-extrabold text-sm uppercase tracking-tight select-none">
+                                          {parsed.company.slice(0, 2)}
+                                        </div>
+                                        <div className="overflow-hidden">
+                                          <h4 className="text-xs font-black text-slate-200 truncate tracking-tight" title={parsed.company}>
+                                            {parsed.company}
+                                          </h4>
+                                          <p className="text-[9px] text-slate-500 flex items-center gap-1 font-semibold mt-0.5">
+                                            <span>📍</span>
+                                            <span className="truncate">{lead.location || 'Not Specified'}</span>
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                          lead.jobType === 'Remote'
+                                            ? 'bg-sky-500/10 border border-sky-500/20 text-sky-400'
+                                            : lead.jobType === 'Contract'
+                                            ? 'bg-amber-500/10 border border-amber-500/20 text-amber-400'
+                                            : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-400'
+                                        }`}>
+                                          {lead.jobType || 'Full-time'}
+                                        </span>
+                                        {lead.emailedAt ? (
+                                          <span
+                                            className="text-[8px] bg-emerald-500/10 border border-emerald-500/25 text-emerald-455 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-0.5 cursor-help"
+                                            title={`Sent: ${lead.emailedSubject || 'No Subject'}`}
+                                          >
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-450 animate-pulse" />
+                                            <span>Emailed</span>
+                                          </span>
+                                        ) : lead.outreachFailed ? (
+                                          <span
+                                            className="text-[8px] bg-rose-500/10 border border-rose-500/25 text-rose-455 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-0.5 cursor-help"
+                                            title={`Error: ${lead.outreachError || 'Delivery failed'}`}
+                                          >
+                                            <span className="w-1.5 h-1.5 rounded-full bg-rose-450 animate-pulse" />
+                                            <span>Failed</span>
+                                          </span>
+                                        ) : (
+                                          <span className="text-[8px] bg-indigo-500/15 border border-indigo-500/20 text-indigo-355 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-0.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-450" />
+                                            <span>Pending</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Job Position title & Highlights */}
+                                    <div className="mb-3">
+                                      <h3 className="text-sm font-black text-white leading-snug tracking-tight mb-2.5 bg-gradient-to-r from-slate-100 via-slate-200 to-indigo-250 bg-clip-text text-transparent group-hover:from-white group-hover:to-indigo-300 transition-all duration-300">
+                                        {parsed.roleTitle}
+                                      </h3>
+                                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                        <div className="bg-slate-950/25 p-2.5 rounded-xl">
+                                          <span className="text-slate-500 block uppercase font-bold text-[8px] tracking-wider mb-0.5">Vacancies</span>
+                                          <span className="text-slate-355 font-bold">{parsed.vacancies}</span>
+                                        </div>
+                                        <div className="bg-slate-950/25 p-2.5 rounded-xl">
+                                          <span className="text-slate-500 block uppercase font-bold text-[8px] tracking-wider mb-0.5">Experience Req.</span>
+                                          <span className="text-slate-355 font-bold">{parsed.experience}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Recruiter Email Action section */}
+                                    <div className={`flex items-center justify-between bg-slate-950/35 border-l-2 p-2.5 rounded-r-xl rounded-l-sm mb-3 ${
+                                      lead.outreachFailed ? 'border-rose-500/50' : 'border-emerald-500/50'
+                                    }`}>
+                                      <div className="overflow-hidden pr-2">
+                                        <span className="text-[8px] text-slate-500 uppercase font-bold tracking-wider block mb-0.5">
+                                          {lead.outreachFailed ? 'Recruiter Email (Delivery Failed)' : 'Recruiter Direct Email'}
+                                        </span>
+                                        <code className={`text-xs font-extrabold truncate select-all block font-mono tracking-tight ${
+                                          lead.outreachFailed ? 'text-rose-400 font-bold' : 'text-emerald-400 font-extrabold'
+                                        }`}>
+                                          {lead.email}
+                                        </code>
+                                        {lead.outreachFailed && lead.outreachError && (
+                                          <span className="text-[9px] text-rose-500/90 truncate block mt-0.5 font-medium leading-none" title={lead.outreachError}>
+                                            ⚠️ {lead.outreachError}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        <button
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(lead.email);
+                                            setCopiedLeadIndex(idx);
+                                            setTimeout(() => setCopiedLeadIndex(null), 2000);
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-850 hover:text-white text-slate-400 transition-all cursor-pointer shadow-sm text-[10px] font-extrabold active:scale-[0.97]"
+                                        >
+                                          {copiedLeadIndex === idx ? 'Copied ✓' : 'Copy'}
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            setOutreachRecipients(prev => {
+                                              const trimmed = prev.trim();
+                                              if (!trimmed) return lead.email;
+                                              const emails = trimmed.split(',').map(e => e.trim()).filter(Boolean);
+                                              if (emails.includes(lead.email)) return prev;
+                                              return `${prev}, ${lead.email}`;
+                                            });
+                                            setActiveTab('outreach');
+                                          }}
+                                          className="px-2.5 py-1.5 rounded-lg bg-indigo-650/10 hover:bg-indigo-650/20 text-indigo-300 transition-all cursor-pointer shadow-sm text-[10px] font-extrabold border border-indigo-500/10 active:scale-[0.97]"
+                                        >
+                                          Outreach
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Collapsible Post Body Content */}
+                                    <div className="relative mb-2">
+                                      <div className={`text-[11px] text-slate-400 leading-relaxed bg-slate-950/15 p-3 rounded-xl whitespace-pre-wrap select-text transition-all duration-300 ${
+                                        expandedLeads[idx] ? '' : 'max-h-[85px] overflow-hidden'
+                                      }`}>
+                                        {lead.postText}
+                                      </div>
+                                      {!expandedLeads[idx] && (
+                                        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-slate-900/90 to-transparent pointer-events-none" />
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => setExpandedLeads(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                      className="text-[10px] font-extrabold text-indigo-400 hover:text-indigo-350 transition-colors flex items-center gap-0.5 cursor-pointer pb-2"
+                                    >
+                                      {expandedLeads[idx] ? 'Show Less ▲' : 'Read Full Post ▼'}
+                                    </button>
+                                  </div>
+
+                                  {/* Location, Poster, Extraction Metadata Footer */}
+                                  <div className="flex items-center justify-between text-[9px] text-slate-550 mt-2.5 pt-2.5">
+                                    <div className="flex items-center gap-1.5 overflow-hidden">
+                                      <span className="text-xs">👤</span>
+                                      {lead.authorProfile ? (
+                                        <a
+                                          href={lead.authorProfile}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="font-bold text-slate-400 hover:text-indigo-400 hover:underline truncate flex items-center gap-0.5"
+                                        >
+                                          <span>{lead.authorName || 'Recruiter'}</span>
+                                          <svg className="w-2.5 h-2.5 opacity-60 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                          </svg>
+                                        </a>
+                                      ) : (
+                                        <span className="font-bold text-slate-400 truncate">{lead.authorName || 'Recruiter'}</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-shrink-0 text-slate-550 font-semibold font-mono">
+                                      <span>⏳ {lead.postTime || 'Recent'}</span>
+                                      <span>•</span>
+                                      <span>📅 {new Date(lead.extractedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-
-                          {/* Email Action */}
-                          <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850 p-2 rounded-lg mb-2">
-                            <code className="text-xs text-emerald-400 font-semibold truncate select-all">{lead.email}</code>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(lead.email);
-                                  setCopiedLeadIndex(idx);
-                                  setTimeout(() => setCopiedLeadIndex(null), 2000);
-                                }}
-                                className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white transition-all cursor-pointer shadow-sm text-[10px] font-bold"
-                              >
-                                {copiedLeadIndex === idx ? 'Copied!' : 'Copy'}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setOutreachRecipients(prev => {
-                                    const trimmed = prev.trim();
-                                    if (!trimmed) return lead.email;
-                                    const emails = trimmed.split(',').map(e => e.trim()).filter(Boolean);
-                                    if (emails.includes(lead.email)) return prev;
-                                    return `${prev}, ${lead.email}`;
-                                  });
-                                  setActiveTab('outreach');
-                                }}
-                                className="px-2 py-1 rounded bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-300 transition-all cursor-pointer shadow-sm text-[10px] font-bold border border-indigo-500/25"
-                              >
-                                Outreach
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Post Body Snippet */}
-                          <p className="text-[11px] text-slate-450 leading-relaxed line-clamp-3 bg-slate-950/15 p-2 rounded-md border border-slate-900/30 whitespace-pre-wrap select-text">
-                            {lead.postText}
-                          </p>
-                        </div>
-
-                        {/* Location and Extraction metadata */}
-                        <div className="flex items-center justify-between text-[9px] text-slate-500 mt-2.5 pt-2 border-t border-slate-900/50">
-                          <span>📍 {lead.location}</span>
-                          <span>⏳ {lead.postTime || 'Recent'}</span>
-                        </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()
                 )}
               </div>
             )}
@@ -1041,7 +1435,7 @@ export default function DashboardPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {sessionHistory.map((sess, idx) => {
+                          {sessionHistory.map((sess: any, idx: number) => {
                             const successRate = sess.attempts > 0
                               ? ((sess.successes / sess.attempts) * 100).toFixed(0)
                               : '0';
@@ -1131,7 +1525,7 @@ export default function DashboardPage() {
                             required
                             disabled={smtpConfig.preset !== 'custom'}
                             value={smtpConfig.host}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, host: e.target.value }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, host: e.target.value })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="e.g. smtp.gmail.com"
                           />
@@ -1143,7 +1537,7 @@ export default function DashboardPage() {
                             required
                             disabled={smtpConfig.preset !== 'custom'}
                             value={smtpConfig.port}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, port: parseInt(e.target.value) || 0 }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, port: parseInt(e.target.value) || 0 })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="e.g. 465"
                           />
@@ -1156,8 +1550,8 @@ export default function DashboardPage() {
                           type="checkbox"
                           disabled={smtpConfig.preset !== 'custom'}
                           checked={smtpConfig.secure}
-                          onChange={(e) => setSmtpConfig(p => ({ ...p, secure: e.target.checked }))}
-                          className="w-4 h-4 text-indigo-600 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 focus:ring-2 focus:ring-offset-slate-900 outline-none cursor-pointer"
+                          onChange={(e) => setSmtpConfig({ ...smtpConfig, secure: e.target.checked })}
+                          className="w-4 h-4 text-indigo-650 bg-slate-950 border-slate-800 rounded focus:ring-indigo-500 focus:ring-2 focus:ring-offset-slate-900 outline-none cursor-pointer"
                         />
                       </div>
 
@@ -1168,7 +1562,7 @@ export default function DashboardPage() {
                             type="text"
                             required
                             value={smtpConfig.username}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, username: e.target.value }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, username: e.target.value })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="e.g. yourname@domain.com"
                           />
@@ -1179,7 +1573,7 @@ export default function DashboardPage() {
                             type="password"
                             required
                             value={smtpConfig.password}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, password: e.target.value }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, password: e.target.value })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="SMTP Password or Token"
                           />
@@ -1193,7 +1587,7 @@ export default function DashboardPage() {
                             type="text"
                             required
                             value={smtpConfig.senderName}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, senderName: e.target.value }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, senderName: e.target.value })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="e.g. Shatadal Sundar Sinha"
                           />
@@ -1203,7 +1597,7 @@ export default function DashboardPage() {
                           <input
                             type="text"
                             value={smtpConfig.senderEmail}
-                            onChange={(e) => setSmtpConfig(p => ({ ...p, senderEmail: e.target.value }))}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, senderEmail: e.target.value })}
                             className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 outline-none focus:border-indigo-500 transition-all"
                             placeholder="Defaults to Username if empty"
                           />
@@ -1240,23 +1634,131 @@ export default function DashboardPage() {
 
                   {/* Outreach Mail Composer Form */}
                   <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 shadow-sm space-y-3">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Outreach Campaign Composer</h3>
-                    
-                    <div className="flex flex-col gap-1.5 text-xs">
-                      <label className="text-slate-400 font-medium flex justify-between">
-                        <span>Recipients (Comma or newline separated)</span>
-                        <span className="text-[10px] text-slate-500">
-                          {outreachRecipients ? `${outreachRecipients.split(/[\n,;]+/).map(e => e.trim()).filter(e => e && e.includes('@')).length} verified` : ''}
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Outreach Campaign Composer</h3>
+                      {parsedEmailList.length > 0 && (
+                        <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                          {parsedEmailList.length} recipient{parsedEmailList.length !== 1 ? 's' : ''} queued
                         </span>
-                      </label>
+                      )}
+                    </div>
+
+                    {/* Recipients Textarea */}
+                    <div className="flex flex-col gap-1.5 text-xs">
+                      <label className="text-slate-400 font-medium">Recipients (comma, semicolon, or newline separated)</label>
                       <textarea
                         rows={2}
                         value={outreachRecipients}
-                        onChange={(e) => setOutreachRecipients(e.target.value)}
+                        onChange={(e) => { setOutreachRecipients(e.target.value); setDuplicateWarning(null); }}
                         className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-200 outline-none focus:border-indigo-500 transition-all font-mono placeholder-slate-650"
                         placeholder="recruiter1@company.com, recruiter2@company.com"
                       />
                     </div>
+
+                    {/* ── Live Recipient Chip List ── */}
+                    {parsedEmailList.length > 0 && (
+                      <div className="bg-slate-950/60 border border-slate-900 rounded-lg p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">📋 Email Dispatch Queue</span>
+                          <div className="flex items-center gap-2 text-[9px] font-semibold">
+                            <span className="text-emerald-400">● New</span>
+                            <span className="text-amber-400">● Duplicate</span>
+                            <span className="text-rose-400">● Already Sent</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                          {parsedEmailList.map((email: string, idx: number) => {
+                            const status = getEmailStatus(email, idx);
+                            return (
+                              <div
+                                key={idx}
+                                title={status === 'already-sent' ? `Already emailed on ${leads.find((l: any) => l.email === email)?.emailedAt?.slice(0, 10)}` : status === 'duplicate' ? 'Duplicate in list' : 'Ready to send'}
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
+                                  status === 'new'
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                    : status === 'duplicate'
+                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                }`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                  status === 'new' ? 'bg-emerald-400' : status === 'duplicate' ? 'bg-amber-400' : 'bg-rose-400'
+                                }`} />
+                                <span className="font-mono truncate max-w-[180px]">{email}</span>
+                                {status === 'already-sent' && <span className="text-[8px] opacity-70 ml-0.5">✓ sent</span>}
+                                {status === 'duplicate' && <span className="text-[8px] opacity-70 ml-0.5">×2</span>}
+                                <button
+                                  onClick={() => {
+                                    const updated = parsedEmailList.filter((_: string, i: number) => i !== idx);
+                                    setOutreachRecipients(updated.join(', '));
+                                    setDuplicateWarning(null);
+                                  }}
+                                  className="ml-0.5 text-[10px] opacity-50 hover:opacity-100 cursor-pointer transition-opacity leading-none"
+                                  title="Remove"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Duplicate / Already-Sent Warning Banner ── */}
+                    {duplicateWarning && (duplicateWarning.duplicates.length > 0 || duplicateWarning.alreadySent.length > 0) && (
+                      <div className="bg-rose-950/30 border border-rose-500/40 rounded-xl p-3.5 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🚫</span>
+                          <span className="text-xs font-bold text-rose-300">Email dispatch blocked — resolve issues first</span>
+                        </div>
+                        {duplicateWarning.alreadySent.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold text-rose-400 mb-1">Already contacted (will cause spam duplicates):</p>
+                            <div className="flex flex-wrap gap-1">
+                              {duplicateWarning.alreadySent.map((e: string) => (
+                                <span key={e} className="font-mono text-[10px] bg-rose-500/15 border border-rose-500/30 text-rose-300 px-2 py-0.5 rounded">{e}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {duplicateWarning.duplicates.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold text-amber-400 mb-1">Duplicate addresses in list:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {duplicateWarning.duplicates.map((e: string) => (
+                                <span key={e} className="font-mono text-[10px] bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded">{e}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              // Auto-clean: remove duplicates + already-sent
+                              const seen = new Set<string>();
+                              const clean = parsedEmailList.filter((e: string) => {
+                                const lo = e.toLowerCase();
+                                if (alreadyContactedSet.has(lo) || seen.has(lo)) return false;
+                                seen.add(lo);
+                                return true;
+                              });
+                              setOutreachRecipients(clean.join(', '));
+                              setDuplicateWarning(null);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer transition-all"
+                          >
+                            Auto-clean List
+                          </button>
+                          <button
+                            onClick={() => setDuplicateWarning(null)}
+                            className="px-3 py-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-slate-300 text-[10px] font-bold cursor-pointer transition-all"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex flex-col gap-1.5 text-xs">
                       <label className="text-slate-400 font-medium">Email Subject</label>
@@ -1270,9 +1772,9 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex flex-col gap-1.5 text-xs">
-                      <label className="text-slate-400 font-medium">Custom Cover Letter Message (Will fit inside HTML design)</label>
+                      <label className="text-slate-400 font-medium">Custom Cover Letter Message</label>
                       <textarea
-                        rows={8}
+                        rows={7}
                         value={outreachMessage}
                         onChange={(e) => setOutreachMessage(e.target.value)}
                         className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-200 outline-none focus:border-indigo-500 transition-all leading-relaxed placeholder-slate-605 font-sans"
@@ -1281,13 +1783,13 @@ export default function DashboardPage() {
                     </div>
 
                     {!smtpConfig.username && (
-                      <div className="bg-amber-500/10 border border-amber-500/25 text-amber-400 rounded-xl p-3 text-xs font-semibold text-center mt-2">
-                        ⚠️ SMTP settings are not configured. Click "Configure SMTP" above to set up your free email provider.
+                      <div className="bg-amber-500/10 border border-amber-500/25 text-amber-400 rounded-xl p-3 text-xs font-semibold text-center">
+                        ⚠️ SMTP not configured. Click "Configure SMTP" above.
                       </div>
                     )}
 
                     {outreachError && (
-                      <div className="bg-rose-500/10 border border-rose-500/25 text-rose-450 rounded-xl p-3 text-xs font-semibold text-center mt-2">
+                      <div className="bg-rose-500/10 border border-rose-500/25 text-rose-400 rounded-xl p-3 text-xs font-semibold text-center">
                         ❌ {outreachError}
                       </div>
                     )}
@@ -1310,7 +1812,7 @@ export default function DashboardPage() {
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                           </svg>
-                          <span>Send Outreach HTML Emails</span>
+                          <span>Send Outreach HTML Emails ({parsedEmailList.filter((_: string, i: number) => getEmailStatus(_, i) === 'new').length} new)</span>
                         </>
                       )}
                     </button>
@@ -1329,7 +1831,7 @@ export default function DashboardPage() {
                         </button>
                       </div>
                       <div className="font-mono text-[10px] space-y-1 max-h-48 overflow-y-auto pr-1">
-                        {outreachLogs.map((log, lidx) => {
+                        {outreachLogs.map((log: string, lidx: number) => {
                           let color = 'text-slate-400';
                           if (log.includes('✅')) color = 'text-emerald-400 font-semibold';
                           else if (log.includes('❌')) color = 'text-rose-400 font-semibold';

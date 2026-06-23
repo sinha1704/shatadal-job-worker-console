@@ -196,23 +196,24 @@ class AutomationManager {
       return false;
     }
 
-    console.log(`[AutomationManager] Stopping automation process PID: ${this.process.pid}`);
+    const procToKill = this.process;
+    console.log(`[AutomationManager] Stopping automation process PID: ${procToKill.pid}`);
     
     if (process.platform === 'win32') {
       try {
         // Safe tree termination on Windows (kills chrome, and tsx child processes)
-        exec(`taskkill /F /T /PID ${this.process.pid}`, (error) => {
+        exec(`taskkill /F /T /PID ${procToKill.pid}`, (error) => {
           if (error) {
             console.warn(`[AutomationManager] taskkill failed: ${error.message}. Falling back to normal kill.`);
-            this.process?.kill('SIGKILL');
+            procToKill.kill('SIGKILL');
           }
         });
       } catch (err: any) {
         console.error(`[AutomationManager] Error during taskkill: ${err.message}`);
-        this.process.kill('SIGKILL');
+        procToKill.kill('SIGKILL');
       }
     } else {
-      this.process.kill('SIGINT');
+      procToKill.kill('SIGINT');
     }
 
     this.process = null;
