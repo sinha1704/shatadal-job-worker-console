@@ -171,7 +171,8 @@ function parseLeadPost(lead: any) {
     roleTitle,
     company,
     vacancies,
-    experience
+    experience,
+    isAbroadLead: lead.isAbroadLead || false
   };
 }
 
@@ -212,6 +213,11 @@ export default function DashboardPage() {
   const [sessionHistory, setSessionHistory] = useState<any[]>([]);
   const [dailyStats, setDailyStats] = useState<Record<string, any>>({});
   const [leads, setLeads] = useState<any[]>([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [leadsPage, setLeadsPage] = useState(1);
+  const [leadsTotalPages, setLeadsTotalPages] = useState(1);
+  const [leadsSummary, setLeadsSummary] = useState({ totalEmailed: 0, totalPending: 0, totalFailed: 0 });
+  const LEADS_PAGE_SIZE = 50;
   const [activeTab, setActiveTab] = useState<'console' | 'leads' | 'history' | 'outreach'>('console');
   const [copiedLeadIndex, setCopiedLeadIndex] = useState<number | null>(null);
   const [expandedLeads, setExpandedLeads] = useState<Record<number, boolean>>({});
@@ -660,18 +666,23 @@ export default function DashboardPage() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 8000);
     return () => clearInterval(interval);
   }, [isAuthenticated, apiBaseUrl, isVercel, isLocalServerOnline]);
 
-  // 3. Fetch recruiter leads from Feed Scouter JSON file
-  const fetchLeads = async () => {
+  // 3. Fetch recruiter leads from Feed Scouter JSON file (paginated & filtered)
+  const fetchLeads = async (page: number = 1, customFilter?: string) => {
     try {
-      const res = await fetch(`${apiBaseUrl}/api/automation/leads`).catch(() => null);
+      const activeFilter = customFilter !== undefined ? customFilter : leadsFilter;
+      const res = await fetch(`${apiBaseUrl}/api/automation/leads?page=${page}&limit=${LEADS_PAGE_SIZE}&status=${activeFilter}`).catch(() => null);
       if (!res || !res.ok) return;
       const data = await res.json().catch(() => null);
       if (!data) return;
       setLeads(data.leads || []);
+      setTotalLeads(data.total ?? data.leads?.length ?? 0);
+      setLeadsPage(data.page ?? 1);
+      setLeadsTotalPages(data.totalPages ?? 1);
+      if (data.summary) setLeadsSummary(data.summary);
     } catch (err) {
       console.error('Failed to fetch leads:', err);
     }
@@ -679,17 +690,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    fetchLeads();
+    fetchLeads(1, leadsFilter);
 
-    // Poll leads every 5 seconds while running to capture new ones in real-time
+    // Poll leads every 10 seconds while running to capture new ones
     let leadsInterval: NodeJS.Timeout | null = null;
     if (isRunning) {
-      leadsInterval = setInterval(fetchLeads, 5000);
+      leadsInterval = setInterval(() => fetchLeads(1, leadsFilter), 10000);
     }
     return () => {
       if (leadsInterval) clearInterval(leadsInterval);
     };
-  }, [isAuthenticated, isRunning, apiBaseUrl]);
+  }, [isAuthenticated, isRunning, apiBaseUrl, leadsFilter]);
 
   // 4. Session runtime local timer (ticks second-by-second for responsive UI feel)
   useEffect(() => {
@@ -838,11 +849,18 @@ export default function DashboardPage() {
         },
         body: JSON.stringify({ portals })
       });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Error starting automation: server returned', res.status, text.slice(0, 200));
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setIsRunning(true);
         setLogs([]); // Reset terminal logs
         connectLogStream();
+      } else {
+        console.warn('Automation start failed:', data.message);
       }
     } catch (err) {
       console.error('Error starting automation:', err);
@@ -855,6 +873,11 @@ export default function DashboardPage() {
     setLoading(true);
     try {
       const res = await fetch(`${apiBaseUrl}/api/automation/stop`, { method: 'POST' });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Error stopping automation: server returned', res.status, text.slice(0, 200));
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setIsRunning(false);
@@ -896,6 +919,10 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.success) {
         setLeads([]);
+        setTotalLeads(0);
+        setLeadsPage(1);
+        setLeadsTotalPages(1);
+        setLeadsSummary({ totalEmailed: 0, totalPending: 0, totalFailed: 0 });
       }
     } catch (err) {
       console.error('Failed to clear leads:', err);
@@ -1428,22 +1455,34 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 flex-shrink-0">
             {(() => {
               const activePortalCount = Object.values(selectedPortals).filter(Boolean).length;
-              const successRate = totalAttempts > 0
-                ? ((successCount / totalAttempts) * 100).toFixed(1)
+              // All-time totals from dailyStats
+              const allTimeApplied = Object.values(dailyStats).reduce((sum: number, d: any) => sum + (d.totalApplied || 0), 0);
+              const allTimeEmails = Object.values(dailyStats).reduce((sum: number, d: any) => sum + (d.totalEmailsSent || 0), 0);
+              const allTimeAttempts = Object.values(dailyStats).reduce((sum: number, d: any) => sum + (d.totalAttempts || 0), 0);
+              // Show live session stats when running, all-time when idle
+              const displayApplied = isRunning ? totalApplied : (totalApplied > 0 ? totalApplied : allTimeApplied);
+              const displayEmails = isRunning ? emailsSent : (emailsSent > 0 ? emailsSent : (leadsSummary.totalEmailed > 0 ? leadsSummary.totalEmailed : allTimeEmails));
+              const displayAttempts = isRunning ? totalAttempts : (totalAttempts > 0 ? totalAttempts : allTimeAttempts);
+              const displaySuccess = isRunning ? successCount : (successCount > 0 ? successCount : allTimeApplied);
+              const successRate = displayAttempts > 0
+                ? ((displaySuccess / displayAttempts) * 100).toFixed(1)
                 : '0.0';
-              const successDesc = totalAttempts > 0
-                ? `${successCount} of ${totalAttempts} attempts`
+              const successDesc = displayAttempts > 0
+                ? `${displaySuccess} of ${displayAttempts} attempts`
                 : isRunning ? 'Waiting for data...' : 'Start agent to track';
-              const appliedDesc = totalApplied > 0
-                ? `Across ${activePortalCount} portal${activePortalCount !== 1 ? 's' : ''}`
+              const appliedDesc = displayApplied > 0
+                ? (isRunning ? `Live session · ${activePortalCount} portal${activePortalCount !== 1 ? 's' : ''}` : `All-time across ${Object.keys(dailyStats).length} days`)
                 : isRunning ? 'Processing...' : 'Not started yet';
+              const emailsDesc = displayEmails > 0
+                ? (isRunning ? 'Outreach sending...' : 'All-time outreach emails')
+                : (isRunning ? 'Sending...' : 'Outreach emails sent');
               const tunnelDesc = isRunning
                 ? `${activePortalCount} active now`
                 : `${activePortalCount} portal${activePortalCount !== 1 ? 's' : ''} selected`;
               const metrics = [
-                { label: 'Success Rate', value: totalAttempts > 0 ? `${successRate}%` : '—', desc: successDesc, color: 'from-emerald-500/15 to-emerald-600/5', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-                { label: 'Total Applied', value: totalApplied.toLocaleString(), desc: appliedDesc, color: 'from-indigo-500/15 to-indigo-600/5', text: 'text-indigo-400', border: 'border-indigo-500/20' },
-                { label: 'Emails Fired', value: emailsSent.toLocaleString(), desc: isRunning ? 'Outreach sending...' : 'Outreach emails sent', color: 'from-amber-500/15 to-amber-600/5', text: 'text-amber-400', border: 'border-amber-500/20' },
+                { label: 'Success Rate', value: displayAttempts > 0 ? `${successRate}%` : '—', desc: successDesc, color: 'from-emerald-500/15 to-emerald-600/5', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+                { label: isRunning ? 'Applied This Run' : 'Total Applied', value: displayApplied.toLocaleString(), desc: appliedDesc, color: 'from-indigo-500/15 to-indigo-600/5', text: 'text-indigo-400', border: 'border-indigo-500/20' },
+                { label: isRunning ? 'Emails This Run' : 'Emails Fired', value: displayEmails.toLocaleString(), desc: emailsDesc, color: 'from-amber-500/15 to-amber-600/5', text: 'text-amber-400', border: 'border-amber-500/20' },
                 { label: 'Session Runtime', value: sessionRuntime !== '00m 00s' ? sessionRuntime : '—', desc: isRunning ? 'Live timer' : (sessionRuntime !== '00m 00s' ? 'Last session' : 'Not running'), color: 'from-purple-500/15 to-purple-600/5', text: 'text-purple-400', border: 'border-purple-500/20' },
                 { label: 'Tunnel Status', value: isRunning ? `${activePortalCount}/${activePortalCount} Active` : `${activePortalCount} Ready`, desc: tunnelDesc, color: 'from-cyan-500/15 to-cyan-600/5', text: 'text-cyan-400', border: 'border-cyan-500/20' },
               ];
@@ -1466,7 +1505,7 @@ export default function DashboardPage() {
               <div className="flex items-center space-x-1">
                 {[
                   { id: 'console', name: 'Live Console Logs', icon: '💻' },
-                  { id: 'leads', name: `LinkedIn Feed Leads (${leads.length})`, icon: '🎯' },
+                  { id: 'leads', name: `LinkedIn Feed Leads (${totalLeads > 0 ? totalLeads : leads.length})`, icon: '🎯' },
                   { id: 'outreach', name: 'Email Outreach', icon: '✉️' },
                   { id: 'history', name: 'Execution History', icon: '📊' }
                 ].map((tab) => (
@@ -1560,67 +1599,60 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   (() => {
-                    const filteredLeads = leads.filter((lead: any) => {
-                      if (leadsFilter === 'emailed') return !!lead.emailedAt;
-                      if (leadsFilter === 'pending') return !lead.emailedAt && !lead.outreachFailed;
-                      if (leadsFilter === 'failed') return !!lead.outreachFailed;
-                      return true;
-                    });
-
                     return (
                       <div className="space-y-4">
                         {/* Stats summary strip */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/15 p-3 rounded-2xl">
                           <div
-                            onClick={() => setLeadsFilter('all')}
+                            onClick={() => { setLeadsFilter('all'); fetchLeads(1, 'all'); }}
                             className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'all'
                                 ? 'bg-indigo-600/15 ring-1 ring-indigo-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
                               }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Leads Collected</span>
-                            <span className="text-sm font-black text-indigo-400 mt-0.5 block font-mono">{leads.length}</span>
+                            <span className="text-sm font-black text-indigo-400 mt-0.5 block font-mono">{totalLeads > 0 ? totalLeads.toLocaleString() : leads.length}</span>
                           </div>
                           <div
-                            onClick={() => setLeadsFilter('emailed')}
+                            onClick={() => { setLeadsFilter('emailed'); fetchLeads(1, 'emailed'); }}
                             className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'emailed'
                                 ? 'bg-emerald-650/15 ring-1 ring-emerald-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
                               }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Emailed Managers</span>
-                            <span className="text-sm font-black text-emerald-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.emailedAt).length}</span>
+                            <span className="text-sm font-black text-emerald-450 mt-0.5 block font-mono">{leadsSummary.totalEmailed.toLocaleString()}</span>
                           </div>
                           <div
-                            onClick={() => setLeadsFilter('pending')}
+                            onClick={() => { setLeadsFilter('pending'); fetchLeads(1, 'pending'); }}
                             className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'pending'
                                 ? 'bg-indigo-650/15 ring-1 ring-indigo-450/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
                               }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Pending Outreach</span>
-                            <span className="text-sm font-black text-indigo-300 mt-0.5 block font-mono">{leads.filter((l: any) => !l.emailedAt && !l.outreachFailed).length}</span>
+                            <span className="text-sm font-black text-indigo-300 mt-0.5 block font-mono">{leadsSummary.totalPending.toLocaleString()}</span>
                           </div>
                           <div
-                            onClick={() => setLeadsFilter('failed')}
+                            onClick={() => { setLeadsFilter('failed'); fetchLeads(1, 'failed'); }}
                             className={`p-2.5 rounded-xl text-center cursor-pointer transition-all duration-200 select-none ${leadsFilter === 'failed'
                                 ? 'bg-rose-650/15 ring-1 ring-rose-500/20 shadow-md'
                                 : 'bg-slate-950/30 hover:bg-slate-950/40 text-slate-400 hover:text-slate-200'
                               }`}
                           >
                             <span className="text-[9px] font-extrabold uppercase tracking-wider block">Failed Outreach</span>
-                            <span className="text-sm font-black text-rose-450 mt-0.5 block font-mono">{leads.filter((l: any) => !!l.outreachFailed).length}</span>
+                            <span className="text-sm font-black text-rose-450 mt-0.5 block font-mono">{leadsSummary.totalFailed.toLocaleString()}</span>
                           </div>
                         </div>
 
-                        {filteredLeads.length === 0 ? (
+                        {leads.length === 0 ? (
                           <div className="bg-slate-900/10 border border-dashed border-slate-900 p-12 text-center rounded-2xl text-slate-500">
                             <span className="text-xs font-semibold block">No leads match the active filter.</span>
                             <span className="text-[10px] text-slate-600 mt-1 block">Try selecting another status tab above.</span>
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                            {filteredLeads.map((lead: any, idx: number) => {
+                            {leads.map((lead: any, idx: number) => {
                               const parsed = parseLeadPost(lead);
                               return (
                                 <div
@@ -1645,6 +1677,11 @@ export default function DashboardPage() {
                                         </div>
                                       </div>
                                       <div className="flex items-center gap-1.5 flex-shrink-0">
+                                        {lead.isAbroadLead && (
+                                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-pink-550/15 border border-pink-500/20 text-pink-400">
+                                            ✈️ Abroad Remote
+                                          </span>
+                                        )}
                                         <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${lead.jobType === 'Remote'
                                             ? 'bg-sky-500/10 border border-sky-500/20 text-sky-400'
                                             : lead.jobType === 'Contract'
@@ -1788,6 +1825,25 @@ export default function DashboardPage() {
                                 </div>
                               );
                             })}
+                          </div>
+                        )}
+
+                        {/* Pagination controls */}
+                        {leadsTotalPages > 1 && (
+                          <div className="flex items-center justify-center gap-3 pt-2 pb-1">
+                            <button
+                              onClick={() => { fetchLeads(leadsPage - 1); }}
+                              disabled={leadsPage <= 1}
+                              className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-900/60 text-slate-300 border border-slate-800 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                            >← Prev</button>
+                            <span className="text-[11px] text-slate-400 font-mono">
+                              Page {leadsPage} / {leadsTotalPages} &nbsp;·&nbsp; {totalLeads.toLocaleString()} total leads
+                            </span>
+                            <button
+                              onClick={() => { fetchLeads(leadsPage + 1); }}
+                              disabled={leadsPage >= leadsTotalPages}
+                              className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-slate-900/60 text-slate-300 border border-slate-800 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                            >Next →</button>
                           </div>
                         )}
                       </div>

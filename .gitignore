@@ -51,3 +51,12 @@ next-env.d.ts
 /automation-profile/
 
 .vercel
+.env*
+
+# local scouter state and databases
+/data/feed_leads.json
+/data/scouter_state.json
+
+# local temp and scratch files
+/scratch/
+/proxy.ts

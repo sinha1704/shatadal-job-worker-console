@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { execSync } from 'child_process';
 import Groq from 'groq-sdk';
 import nodemailer from 'nodemailer';
+import Imap from 'imap';
 import { getGraphicOutreachTemplate } from './app/utils/emailTemplates';
 
 // Apply the stealth plugin to hide automation indicators
@@ -15,18 +16,39 @@ const CHROME_USER_DATA_DIR = 'C:\\Users\\shata\\automation-profile';
 const CHROME_PROFILE_NAME = 'Default';
 const CHROME_EXECUTABLE_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 
-// Search keyword pool (selected randomly on each execution run)
+// Search keyword pool — focusing on core React/Next/Frontend skills without any location keywords
 const SEARCH_KEYWORDS = [
-  'Frontend Developer',
-  'Senior Frontend Developer',
-  'React Developer',
-  'Next.js Developer',
-  'Full Stack Developer'
+  'hiring React js',
+  'hiring Next js',
+  'hiring React developer',
+  'hiring Next.js developer',
+  'hiring Frontend developer',
+  'hiring UI developer',
+  'hiring Senior React developer',
+  'hiring Senior Frontend developer',
+  'hiring React Frontend developer',
+  'hiring Nextjs developer'
+];
+
+// Kolkata-specific keyword pool is set identical to SEARCH_KEYWORDS to adhere to location-free query policy
+const KOLKATA_KEYWORDS = [
+  'hiring React js',
+  'hiring Next js',
+  'hiring React developer',
+  'hiring Next.js developer',
+  'hiring Frontend developer',
+  'hiring UI developer',
+  'hiring React Frontend developer',
+  'hiring Nextjs developer',
+  'hiring Senior React developer',
+  'hiring Senior Frontend developer'
 ];
 
 function getRandomSearchKeyword(): string {
-  const idx = Math.floor(Math.random() * SEARCH_KEYWORDS.length);
-  return SEARCH_KEYWORDS[idx];
+  // 50% of the time pick a Kolkata-specific keyword for local job priority
+  const useKolkata = Math.random() < 0.5;
+  const pool = useKolkata ? KOLKATA_KEYWORDS : SEARCH_KEYWORDS;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // Standard human-like delay helper
@@ -49,7 +71,7 @@ async function closeExtraTabs(context: any, allowedActivePages: any[] = []) {
     for (const p of pages) {
       if (!globalMainPages.has(p) && !allowedActivePages.includes(p) && !p.isClosed()) {
         console.log(`[Safety Guard] Closing leaked/extra tab: ${p.url()}`);
-        await p.close().catch(() => {});
+        await p.close().catch(() => { });
       }
     }
   } catch (err: any) {
@@ -64,7 +86,7 @@ let currentJobSalaryRange: { min: number; max: number } | null = null;
 // Parse salary range from job title/description
 function detectSalaryRange(text: string): { min: number; max: number } | null {
   if (!text) return null;
-  
+
   // Clean string (remove commas, soft hyphens, zero-width chars)
   const cleanText = text.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/,/g, '');
 
@@ -172,8 +194,17 @@ function getGroqClient() {
   return groqInstance;
 }
 
+const aiCache = new Map<string, string>();
+
 // Dynamically answer application questions or choose dropdown options using Llama 3 via Groq
 async function askAI(labelText: string, fieldType: 'input' | 'select' | 'textarea', optionsList: string[] = []): Promise<string> {
+  const cacheKey = `${fieldType}:${labelText}:${optionsList.join(',')}`;
+  if (aiCache.has(cacheKey)) {
+    const cachedVal = aiCache.get(cacheKey)!;
+    console.log(`[AI Solver Cache] 🎯 Hit: "${labelText}" -> "${cachedVal}"`);
+    return cachedVal;
+  }
+
   const client = getGroqClient();
   if (!client) {
     console.warn('[AI Solver] Groq client not initialized (missing API key). Using fallback.');
@@ -217,25 +248,25 @@ ${profileSummary}
 
 Respond with ONLY the index number of the chosen option (e.g., "0" or "2"). Do not include any explanation or extra text.`;
   } else {
-    const isNumericQuestion = labelText.toLowerCase().includes('how many') || 
-                              labelText.toLowerCase().includes('number of') || 
-                              labelText.toLowerCase().includes('experience') || 
-                              labelText.toLowerCase().includes('years') ||
-                              labelText.toLowerCase().includes('salary') ||
-                              labelText.toLowerCase().includes('ctc') ||
-                              labelText.toLowerCase().includes('compensation') ||
-                              labelText.toLowerCase().includes('expected') ||
-                              labelText.toLowerCase().includes('expectation') ||
-                              labelText.toLowerCase().includes('current') ||
-                              labelText.toLowerCase().includes('notice') ||
-                              labelText.toLowerCase().includes('days') ||
-                              labelText.toLowerCase().includes('inr') ||
-                              labelText.toLowerCase().includes('lpa') ||
-                              labelText.toLowerCase().includes('lakh') ||
-                              labelText.toLowerCase().includes('lac') ||
-                              labelText.toLowerCase().includes('rupee') ||
-                              labelText.toLowerCase().includes('pay');
-    
+    const isNumericQuestion = labelText.toLowerCase().includes('how many') ||
+      labelText.toLowerCase().includes('number of') ||
+      labelText.toLowerCase().includes('experience') ||
+      labelText.toLowerCase().includes('years') ||
+      labelText.toLowerCase().includes('salary') ||
+      labelText.toLowerCase().includes('ctc') ||
+      labelText.toLowerCase().includes('compensation') ||
+      labelText.toLowerCase().includes('expected') ||
+      labelText.toLowerCase().includes('expectation') ||
+      labelText.toLowerCase().includes('current') ||
+      labelText.toLowerCase().includes('notice') ||
+      labelText.toLowerCase().includes('days') ||
+      labelText.toLowerCase().includes('inr') ||
+      labelText.toLowerCase().includes('lpa') ||
+      labelText.toLowerCase().includes('lakh') ||
+      labelText.toLowerCase().includes('lac') ||
+      labelText.toLowerCase().includes('rupee') ||
+      labelText.toLowerCase().includes('pay');
+
     prompt = `You are a job application assistant helping Shatadal Sundar Sinha apply for a Senior Frontend Developer job.
 Based on the candidate's profile, provide a concise, natural, and professional answer to the question: "${labelText}".
 ${isNumericQuestion ? 'Since this question asks for a number, quantity, salary, notice period, or years of experience, you MUST respond with ONLY a single number, digits, or decimal (e.g., "5", "15", "1200000" or "12"). Do NOT write any sentences, currency symbols, letters, words, or explanations. Just return the digits/number.' : ''}
@@ -260,6 +291,9 @@ Answer directly and concisely (maximum 1-2 sentences). Do not include any conver
 
     const response = (chatCompletion.choices[0]?.message?.content || '').trim();
     console.log(`[AI Solver] Question: "${labelText}" -> Answer: "${response}"`);
+
+    // Cache the answer before returning
+    aiCache.set(cacheKey, response);
     return response;
   } catch (err: any) {
     console.error(`[AI Solver] Error calling Groq: ${err.message}`);
@@ -284,7 +318,7 @@ async function injectVirtualCursor(page: any) {
         container.style.width = '100%';
         container.style.height = '100%';
         container.style.zIndex = '2147483647';
-        
+
         const style = document.createElement('style');
         style.innerHTML = `
           @keyframes ai-pulse {
@@ -393,7 +427,7 @@ async function injectVirtualCursor(page: any) {
 
         document.addEventListener('mousedown', (e) => {
           cursor.style.transform = 'scale(0.8)';
-          
+
           const ripple = document.createElement('div');
           ripple.style.position = 'fixed';
           ripple.style.left = `${e.clientX - 15}px`;
@@ -405,12 +439,12 @@ async function injectVirtualCursor(page: any) {
           ripple.style.pointerEvents = 'none';
           ripple.style.transition = 'all 0.4s ease-out';
           container.appendChild(ripple);
-          
+
           setTimeout(() => {
             ripple.style.transform = 'scale(2.2)';
             ripple.style.opacity = '0';
           }, 10);
-          
+
           setTimeout(() => ripple.remove(), 450);
         });
 
@@ -465,15 +499,15 @@ async function updateAgentStatus(pageOrFrame: any, statusText: string) {
         activeEl.style.boxShadow = '0 0 12px rgba(139, 92, 246, 0.8)';
         activeEl.style.borderColor = '#8b5cf6';
       }
-    }, statusText).catch(() => {});
-  } catch {}
+    }, statusText).catch(() => { });
+  } catch { }
 }
 
 // Smooth mouse click helper
 async function humanClick(pageOrFrame: any, locator: any) {
   try {
     await updateAgentStatus(pageOrFrame, 'Clicking');
-    await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+    await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => { });
     const box = await locator.boundingBox();
     if (box) {
       const x = box.x + box.width / 2;
@@ -487,7 +521,7 @@ async function humanClick(pageOrFrame: any, locator: any) {
     }
     await updateAgentStatus(pageOrFrame, 'Working');
   } catch {
-    await locator.click({ force: true }).catch(() => {});
+    await locator.click({ force: true }).catch(() => { });
     await updateAgentStatus(pageOrFrame, 'Working');
   }
 }
@@ -497,7 +531,7 @@ async function humanFill(pageOrFrame: any, locator: any, text: string) {
   try {
     const shortText = text.length > 15 ? text.substring(0, 15) + '...' : text;
     await updateAgentStatus(pageOrFrame, `Typing "${shortText}"`);
-    await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+    await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => { });
     const box = await locator.boundingBox();
     if (box) {
       const x = box.x + box.width / 2;
@@ -510,7 +544,7 @@ async function humanFill(pageOrFrame: any, locator: any, text: string) {
     await locator.fill(text);
     await updateAgentStatus(pageOrFrame, 'Working');
   } catch {
-    await locator.fill(text).catch(() => {});
+    await locator.fill(text).catch(() => { });
     await updateAgentStatus(pageOrFrame, 'Working');
   }
 }
@@ -525,17 +559,17 @@ async function getLabelTextForInput(pageOrFrame: any, input: any): Promise<strin
         return (await pageOrFrame.locator(labelSelector).first().textContent() || '').toLowerCase();
       }
     }
-    
+
     const placeholder = await input.getAttribute('placeholder') || '';
     if (placeholder) return placeholder.toLowerCase();
-    
+
     const ariaLabel = await input.getAttribute('aria-label') || '';
     if (ariaLabel) return ariaLabel.toLowerCase();
 
     // Check if nested inside a label element
     const parentLabel = await input.locator('xpath=./ancestor::label').first().textContent().catch(() => '') || '';
     if (parentLabel) return parentLabel.toLowerCase();
-    
+
     const nameAttr = await input.getAttribute('name') || '';
     if (nameAttr) return nameAttr.toLowerCase();
 
@@ -544,14 +578,14 @@ async function getLabelTextForInput(pageOrFrame: any, input: any): Promise<strin
     for (let depth = 0; depth < 3; depth++) {
       current = current.locator('xpath=..');
       if (await current.count() === 0) break;
-      
+
       const labels = current.locator('label, span, div, p');
       const count = await labels.count();
       for (let j = 0; j < count; j++) {
         const el = labels.nth(j);
         const className = await el.getAttribute('class') || '';
         const tagName = await el.evaluate((node: any) => node.tagName.toLowerCase());
-        
+
         if (tagName === 'label' || className.toLowerCase().includes('label') || className.toLowerCase().includes('title') || className.toLowerCase().includes('text') || className.toLowerCase().includes('name') || className.toLowerCase().includes('question')) {
           const text = (await el.textContent() || '').trim();
           if (text && text.length > 2 && text.length < 150) {
@@ -560,7 +594,7 @@ async function getLabelTextForInput(pageOrFrame: any, input: any): Promise<strin
         }
       }
     }
-  } catch {}
+  } catch { }
   return '';
 }
 
@@ -612,7 +646,7 @@ async function fillSingleInput(pageOrFrame: any, input: any, labelText: string) 
   } else if (labelText.includes('notice') || labelText.includes('days') || labelText.includes('joining') || labelText.includes('start date')) {
     console.log(`[Form Fill] Filling notice period (0)...`);
     await humanFill(pageOrFrame, input, '0');
-  } 
+  }
   // Education Background
   else if (labelText.includes('university') || labelText.includes('college') || labelText.includes('institute') || labelText.includes('school') || labelText.includes('education')) {
     console.log(`[Form Fill] Filling university / college (Maulana Abul Kalam Azad University of Technology)...`);
@@ -638,7 +672,7 @@ async function fillSingleInput(pageOrFrame: any, input: any, labelText: string) 
     const val = getCurrentSalaryValue(labelText);
     console.log(`[Form Fill] Filling current salary (${val})...`);
     await humanFill(pageOrFrame, input, val);
-  } 
+  }
   // Profiles & links
   else if (labelText.includes('linkedin') || labelText.includes('profile link') || labelText.includes('social profile')) {
     console.log(`[Form Fill] Filling LinkedIn profile URL...`);
@@ -646,7 +680,7 @@ async function fillSingleInput(pageOrFrame: any, input: any, labelText: string) 
   } else if (labelText.includes('portfolio') || labelText.includes('personal website') || labelText.includes('website link') || labelText.includes('blog') || labelText.includes('github') || labelText.includes('link')) {
     console.log(`[Form Fill] Filling portfolio URL...`);
     await humanFill(pageOrFrame, input, 'https://shatadalpersonalassistent.vercel.app/');
-  } 
+  }
   else if (labelText.includes('cover letter') || labelText.includes('additional') || labelText.includes('message') || labelText.includes('why should we hire you') || labelText.includes('why should we hire')) {
     console.log(`[Form Fill] Filling cover letter...`);
     await humanFill(pageOrFrame, input, 'I am a Senior Frontend Developer with approximately 5 years of experience specializing in React, Next.js, and TypeScript. I have a strong track record of building performant, responsive web applications and would love to contribute to your team.');
@@ -669,8 +703,8 @@ async function fillSingleInput(pageOrFrame: any, input: any, labelText: string) 
   else {
     console.log(`[Form Fill] Uncommon field detected: "${labelText}". Querying Groq AI...`);
     try {
-      await input.focus().catch(() => {});
-    } catch {}
+      await input.focus().catch(() => { });
+    } catch { }
     await updateAgentStatus(pageOrFrame, 'Thinking with AI');
     const aiAnswer = await askAI(labelText, 'input');
     if (aiAnswer) {
@@ -706,7 +740,7 @@ async function checkAndFixValidationErrors(pageOrFrame: any) {
         const errorEl = errors.nth(i);
         const errorText = (await errorEl.textContent() || '').toLowerCase();
         console.warn(`[Validation Failsafe] Found active validation error: "${errorText.trim()}"`);
-        
+
         // Locate parent container to find the specific input field
         let parentContainer = errorEl.locator('xpath=./ancestor::div[contains(@class, "fb-form-element") or contains(@class, "jobs-easy-apply-form-section__group") or contains(@class, "jobs-easy-apply-form-section__group-child") or contains(@class, "icl-TextInput") or contains(@class, "icl-FormRow") or contains(@class, "form-group") or contains(@class, "form-field") or contains(@class, "css-") or contains(@class, "ia-")]').first();
         if (await parentContainer.count() === 0) {
@@ -717,12 +751,12 @@ async function checkAndFixValidationErrors(pageOrFrame: any) {
           if (await input.count() > 0 && await input.isEditable()) {
             const currentVal = await input.inputValue();
             console.log(`[Validation Failsafe] Current field value: "${currentVal}"`);
-            
+
             // Fix: If validation requires a decimal or numeric value and text is found, strip all non-numbers!
             if (errorText.includes('number') || errorText.includes('decimal') || errorText.includes('digit') || errorText.includes('numeric') || errorText.includes('larger than') || errorText.includes('larger than 0.0') || errorText.includes('greater than')) {
               let numericOnly = currentVal.replace(/[^0-9.]/g, '');
               const needsPositive = errorText.includes('larger than 0') || errorText.includes('greater than 0') || errorText.includes('larger than 0.0') || errorText.includes('greater than 0.0');
-              
+
               // If it's not a valid number or empty, let's query the AI for a clean number
               if (!numericOnly || (needsPositive && parseFloat(numericOnly) <= 0)) {
                 const labelText = await getLabelTextForInput(pageOrFrame, input);
@@ -766,36 +800,43 @@ async function checkAndFixValidationErrors(pageOrFrame: any) {
 // Element-specific smooth scrolling
 async function elementScroll(page: any, selector: string, scrollDistance = 400) {
   try {
-    await updateAgentStatus(page, 'Scrolling container');
     await page.evaluate(({ sel, dist }: { sel: string, dist: number }) => {
       const el = document.querySelector(sel);
       if (el) {
-        el.scrollBy({ top: dist, behavior: 'smooth' });
+        el.scrollBy(0, dist); // ✅ SPEED: instant scroll, no smooth animation
       }
     }, { sel: selector, dist: scrollDistance });
-    await delay(500 + Math.random() * 200);
-    await updateAgentStatus(page, 'Working');
-  } catch {}
+    await delay(180); // ✅ SPEED: was 500-700ms
+  } catch { }
 }
 
 async function isLinkedInLoggedIn(page: any): Promise<boolean> {
   try {
+    await page.waitForLoadState('domcontentloaded').catch(() => { });
+
+    // Wait up to 5s for either logged-in or logged-out indicators to be attached
+    const loggedInSelector = '#global-nav, .global-nav, .global-nav__me, a[href*="/feed/"], a[href*="/messaging/"]';
+    const loggedOutSelector = 'a[href*="/login"], a[href*="/signup"], button:has-text("Sign in"), input[name="session_key"], form.login__form';
+
+    await Promise.race([
+      page.waitForSelector(loggedInSelector, { state: 'attached', timeout: 5000 }).catch(() => { }),
+      page.waitForSelector(loggedOutSelector, { state: 'attached', timeout: 5000 }).catch(() => { })
+    ]);
+
     const navIndicators = [
       '#global-nav',
       '.global-nav',
       '.global-nav__me',
       '.global-nav__me-photo',
       'a[href*="/feed/"]',
-      'a[href*="/jobs/"]',
-      'a[href*="/messaging/"]',
-      'input.search-global-typeahead__input'
+      'a[href*="/messaging/"]'
     ];
     for (const sel of navIndicators) {
       if (await page.locator(sel).count() > 0) {
         return true;
       }
     }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -814,32 +855,55 @@ async function isInstahyreLoggedIn(page: any): Promise<boolean> {
         return true;
       }
     }
-  } catch {}
+  } catch { }
   return false;
 }
 
 async function isIndeedLoggedIn(page: any): Promise<boolean> {
   try {
-    const signInIndicators = [
-      'a[href*="signin"]',
-      'a[href*="sign-in"]',
-      'a[href*="/account/login"]',
-      'button:has-text("Sign in")'
+    await page.waitForLoadState('domcontentloaded').catch(() => { });
+
+    const loggedInSelector = 'a[href*="/myjobs"], a[href*="/profile"], button[id="google-user-avatar"], .gnav-Profile, button[aria-label*="profile" i]';
+    const loggedOutSelector = 'a[href*="signin"], a[href*="sign-in"], a[href*="/account/login"], button:has-text("Sign in")';
+
+    await Promise.race([
+      page.waitForSelector(loggedInSelector, { state: 'attached', timeout: 5000 }).catch(() => { }),
+      page.waitForSelector(loggedOutSelector, { state: 'attached', timeout: 5000 }).catch(() => { })
+    ]);
+
+    const loggedInIndicators = [
+      'a[href*="/myjobs"]',
+      'a[href*="/profile"]',
+      'button[id="google-user-avatar"]',
+      '.gnav-Profile',
+      'button[aria-label*="profile" i]'
     ];
-    let hasSignIn = false;
-    for (const sel of signInIndicators) {
+    for (const sel of loggedInIndicators) {
       if (await page.locator(sel).count() > 0) {
-        hasSignIn = true;
-        break;
+        return true;
       }
     }
-    return !hasSignIn;
-  } catch {}
-  return true;
+  } catch { }
+  return false;
 }
 
 async function isNaukriLoggedIn(page: any): Promise<boolean> {
   try {
+    await page.waitForLoadState('domcontentloaded').catch(() => { });
+
+    const url = page.url();
+    if (url.includes('nlogin') || url.includes('/login')) {
+      return false;
+    }
+
+    const loggedInSelector = 'a[href*="/nprofile/"], a:has-text("My Naukri"), .nProfile, .nui-profile-photo, a:has-text("Logout")';
+    const loggedOutSelector = '#login_Layer, a:has-text("Login"), a[href*="/nlogin"]';
+
+    await Promise.race([
+      page.waitForSelector(loggedInSelector, { state: 'attached', timeout: 5000 }).catch(() => { }),
+      page.waitForSelector(loggedOutSelector, { state: 'attached', timeout: 5000 }).catch(() => { })
+    ]);
+
     const loggedInIndicators = [
       'a[href*="/nprofile/"]',
       'a:has-text("My Naukri")',
@@ -853,11 +917,7 @@ async function isNaukriLoggedIn(page: any): Promise<boolean> {
         return true;
       }
     }
-    
-    // Fallback: check if there's no login layer/button
-    const hasLoginButton = await page.locator('#login_Layer, a:has-text("Login")').count() > 0;
-    return !hasLoginButton;
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -893,7 +953,7 @@ async function handleGoogleAccountChooser(targetPage: any): Promise<boolean> {
     if (url.includes('accounts.google.com')) {
       console.log('[Google SSO] Detected Google Accounts page. Solving chooser...');
       await targetPage.waitForTimeout(1500);
-      
+
       // Look for shatadal17@gmail.com
       const emailSelector = targetPage.locator('[data-email="shatadal17@gmail.com"], [data-identifier="shatadal17@gmail.com"], div:has-text("shatadal17@gmail.com")');
       const count = await emailSelector.count();
@@ -903,7 +963,7 @@ async function handleGoogleAccountChooser(targetPage: any): Promise<boolean> {
         await targetPage.waitForTimeout(2000);
         return true;
       }
-      
+
       // Fallback: look for any elements containing the email text
       const textSelector = targetPage.locator('text=shatadal17@gmail.com');
       if (await textSelector.count() > 0) {
@@ -930,7 +990,7 @@ async function handleGoogleAccountChooser(targetPage: any): Promise<boolean> {
 
 async function clickGoogleSSOAndAuthorize(page: any, googleButtonLocator: any): Promise<boolean> {
   const context = page.context();
-  
+
   // Set up listener for popup if it opens in a new tab/window
   let popupPage: any = null;
   const popupPromise = context.waitForEvent('page', { timeout: 8000 }).then((p: any) => {
@@ -940,17 +1000,17 @@ async function clickGoogleSSOAndAuthorize(page: any, googleButtonLocator: any): 
 
   console.log('[Google SSO] Clicking the Google SSO button...');
   await humanClick(page, googleButtonLocator);
-  
+
   // Wait up to 3 seconds for either popup or redirect
   await page.waitForTimeout(3000);
-  
+
   // Case 1: Popup was opened
   const popup = await popupPromise;
   if (popup) {
     console.log('[Google SSO] Google login popup detected!');
-    await popup.waitForLoadState('domcontentloaded').catch(() => {});
+    await popup.waitForLoadState('domcontentloaded').catch(() => { });
     await handleGoogleAccountChooser(popup);
-    
+
     // Wait for popup to close automatically or navigate back
     for (let i = 0; i < 15; i++) {
       if (popup.isClosed()) {
@@ -963,10 +1023,10 @@ async function clickGoogleSSOAndAuthorize(page: any, googleButtonLocator: any): 
     }
     return true;
   }
-  
+
   // Case 2: Redirection occurred in main page
   await handleGoogleAccountChooser(page);
-  
+
   // Just in case, scan all pages in context
   const allPages = context.pages();
   for (const p of allPages) {
@@ -1015,7 +1075,7 @@ async function attemptLinkedInLogin(page: any): Promise<boolean> {
         await randomDelay(300, 600);
         await humanFill(page, passwordInput, creds.linkedinPassword);
         await randomDelay(500, 1000);
-        
+
         await updateAgentStatus(page, 'Logging In');
         await humanClick(page, submitBtn);
         await randomDelay(3000, 5000);
@@ -1118,7 +1178,7 @@ async function attemptIndeedLogin(page: any): Promise<boolean> {
       if (await emailInput.count() > 0) {
         await humanFill(page, emailInput, creds.indeedEmail);
         await randomDelay(500, 1000);
-        
+
         const nextBtn = page.locator('button[type="submit"], button:has-text("Continue")').first();
         await humanClick(page, nextBtn);
         await randomDelay(1500, 2500);
@@ -1127,7 +1187,7 @@ async function attemptIndeedLogin(page: any): Promise<boolean> {
         if (await passwordInput.count() > 0) {
           await humanFill(page, passwordInput, creds.indeedPassword);
           await randomDelay(500, 1000);
-          
+
           const signInBtn = page.locator('button[type="submit"], button:has-text("Sign in")').first();
           await humanClick(page, signInBtn);
           await randomDelay(3000, 5000);
@@ -1203,7 +1263,7 @@ async function attemptNaukriLogin(page: any): Promise<boolean> {
 const humanScroll = async (page: any, scrollDistance = 400) => {
   try {
     await updateAgentStatus(page, 'Scrolling');
-    
+
     // 1. Force unlock body and html overflow styles (overrides scroll locks from popups)
     await page.evaluate(() => {
       const unlock = (el: HTMLElement | null) => {
@@ -1215,7 +1275,7 @@ const humanScroll = async (page: any, scrollDistance = 400) => {
       };
       unlock(document.body);
       unlock(document.documentElement);
-      
+
       // Also unlock common LinkedIn layout containers
       unlock(document.querySelector('.scaffold-layout'));
       unlock(document.querySelector('.scaffold-layout__inner'));
@@ -1232,15 +1292,15 @@ const humanScroll = async (page: any, scrollDistance = 400) => {
           }
         }
       });
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Focus main container area to ensure keyboard PageDown / ArrowDown scrolls the actual feed
     try {
       const mainEl = page.locator('#main, main, .scaffold-layout__main, .feed-shared-update-v2').first();
       if (await mainEl.count() > 0 && await mainEl.isVisible()) {
-        await mainEl.focus().catch(() => {});
+        await mainEl.focus().catch(() => { });
       }
-    } catch {}
+    } catch { }
 
     // 2. Try JavaScript scrolling (window + scrollingElement)
     await page.evaluate((dist: number) => {
@@ -1248,69 +1308,118 @@ const humanScroll = async (page: any, scrollDistance = 400) => {
       if (document.scrollingElement) {
         document.scrollingElement.scrollBy({ top: dist, behavior: 'smooth' });
       }
-    }, scrollDistance).catch(() => {});
+    }, scrollDistance).catch(() => { });
 
     // 3. Native Playwright Mouse Wheel Scrolling (simulates physical hardware scrolling)
-    await page.mouse.wheel(0, scrollDistance).catch(() => {});
+    await page.mouse.wheel(0, scrollDistance).catch(() => { });
 
     // 4. Keyboard PageDown Bypass (fallback if layout/mouse scrolling are intercepted)
-    await page.keyboard.press('PageDown').catch(() => {});
+    await page.keyboard.press('PageDown').catch(() => { });
 
     await delay(500 + Math.random() * 200);
     await updateAgentStatus(page, 'Working');
-  } catch {}
+  } catch { }
 };
 
 // Simulated AI/LLM Profile Match Check (replace with real API call as needed)
 async function checkProfileMatch(title: string, description: string): Promise<{ isMatch: boolean; confidence: number }> {
   console.log(`[AI Match Engine] Evaluating: "${title}"`);
-  
-  const keywords = ['react', 'next.js', 'nextjs', 'typescript', 'frontend', 'front-end', 'developer', 'engineer', 'javascript', 'js', 'html', 'css', 'web', 'ui', 'frontend lead', 'reactjs', 'full stack', 'fullstack'];
+
   const titleLower = title.toLowerCase();
   const descLower = description.toLowerCase();
   const content = (titleLower + ' ' + descLower);
-  
+
+  // 1. Strict Exclusions for specific backend/QA/unrelated roles in the Title
+  const isExcludedRole =
+    (/\bjava\b/i.test(titleLower) && !/\bjavascript\b/i.test(titleLower)) ||
+    /\bpython\b/i.test(titleLower) ||
+    /\bspringboot\b/i.test(titleLower) ||
+    /\bspring\s*boot\b/i.test(titleLower) ||
+    /\bgolang\b/i.test(titleLower) ||
+    /\bdevops\b/i.test(titleLower) ||
+    /\bqa\b/i.test(titleLower) ||
+    /\btester\b/i.test(titleLower) ||
+    /\btesting\b/i.test(titleLower) ||
+    /\bphp\b/i.test(titleLower) ||
+    /\blaravel\b/i.test(titleLower) ||
+    /\bwordpress\b/i.test(titleLower) ||
+    /\bflutter\b/i.test(titleLower) ||
+    /\bandroid\b/i.test(titleLower) ||
+    /\bios\b/i.test(titleLower) ||
+    /\bswift\b/i.test(titleLower) ||
+    /\b\.net\b/i.test(titleLower) ||
+    /\bdotnet\b/i.test(titleLower) ||
+    /\bc#\b/i.test(titleLower) ||
+    (/\bbackend\b/i.test(titleLower) && !/\bfrontend\b/i.test(titleLower) && !/\bfront-end\b/i.test(titleLower));
+
+  if (isExcludedRole) {
+    console.log(`[AI Match Engine] Decision: ❌ NO MATCH (Excluded keyword in title: "${title}")`);
+    return { isMatch: false, confidence: 0 };
+  }
+
+  // 2. Limit Full Stack to modern JavaScript/TypeScript stack and reject Java/Python/PHP/DotNet Full Stack
+  const isFullStack = titleLower.includes('full stack') || titleLower.includes('fullstack') || descLower.includes('full stack') || descLower.includes('fullstack');
+  const hasBackendStack =
+    (/\bjava\b/i.test(descLower) && !/\bjavascript\b/i.test(descLower)) ||
+    /\bpython\b/i.test(descLower) ||
+    /\bspringboot\b/i.test(descLower) ||
+    /\bspring\s*boot\b/i.test(descLower) ||
+    /\b\.net\b/i.test(descLower) ||
+    /\bdotnet\b/i.test(descLower) ||
+    /\bc#\b/i.test(descLower) ||
+    /\bphp\b/i.test(descLower) ||
+    /\blaravel\b/i.test(descLower) ||
+    /\bgolang\b/i.test(descLower) ||
+    /\bdjango\b/i.test(descLower);
+
+  if (isFullStack && hasBackendStack) {
+    console.log(`[AI Match Engine] Decision: ❌ NO MATCH (Full Stack with Java/Python/PHP/DotNet backend)`);
+    return { isMatch: false, confidence: 0 };
+  }
+
+  const keywords = ['react', 'next.js', 'nextjs', 'typescript', 'frontend', 'front-end', 'developer', 'engineer', 'javascript', 'js', 'html', 'css', 'web', 'ui', 'frontend lead', 'reactjs', 'full stack', 'fullstack'];
+
   // Direct title-based override for perfect matches
-  const isFrontendRole = titleLower.includes('frontend') || 
-                          titleLower.includes('front-end') || 
-                          titleLower.includes('react') || 
-                          titleLower.includes('next.js') || 
-                          titleLower.includes('nextjs') || 
-                          titleLower.includes('full stack') || 
-                          titleLower.includes('fullstack') || 
-                          titleLower.includes('ui developer') || 
-                          titleLower.includes('ui engineer') || 
-                          titleLower.includes('web developer');
-                          
-  const isDevOrEng = titleLower.includes('developer') || 
-                      titleLower.includes('engineer') || 
-                      titleLower.includes('sr') || 
-                      titleLower.includes('senior') || 
-                      titleLower.includes('lead') || 
-                      titleLower.includes('architect');
-  
+  const isFrontendRole = titleLower.includes('frontend') ||
+    titleLower.includes('front-end') ||
+    titleLower.includes('react') ||
+    titleLower.includes('next.js') ||
+    titleLower.includes('nextjs') ||
+    titleLower.includes('full stack') ||
+    titleLower.includes('fullstack') ||
+    titleLower.includes('ui developer') ||
+    titleLower.includes('ui engineer') ||
+    titleLower.includes('web developer');
+
+  const isDevOrEng = titleLower.includes('developer') ||
+    titleLower.includes('engineer') ||
+    titleLower.includes('sr') ||
+    titleLower.includes('senior') ||
+    titleLower.includes('lead') ||
+    titleLower.includes('architect');
+
   if (isFrontendRole && isDevOrEng) {
     console.log(`[AI Match Engine] Decision: ✅ MATCH (Title-based auto-match)`);
     return { isMatch: true, confidence: 1.0 };
   }
 
   // Broad/Lenient fallback check for general Software Developer roles that use our tech stack
-  const isGenericSoftwareRole = titleLower.includes('software') || 
-                                 titleLower.includes('systems') || 
-                                 titleLower.includes('associate') || 
-                                 titleLower.includes('application') ||
-                                 titleLower.includes('web') ||
-                                 titleLower.includes('ui') ||
-                                 titleLower.includes('ux');
-                                 
-  const usesFrontendStack = descLower.includes('react') || 
-                             descLower.includes('next.js') || 
-                             descLower.includes('nextjs') || 
-                             descLower.includes('typescript') || 
-                             descLower.includes('angular') || 
-                             descLower.includes('javascript') || 
-                             descLower.includes('front-end') || 
-                             descLower.includes('frontend');
+  const isGenericSoftwareRole = titleLower.includes('software') ||
+    titleLower.includes('systems') ||
+    titleLower.includes('associate') ||
+    titleLower.includes('application') ||
+    titleLower.includes('web') ||
+    titleLower.includes('ui') ||
+    titleLower.includes('ux');
+
+  const usesFrontendStack = descLower.includes('react') ||
+    descLower.includes('next.js') ||
+    descLower.includes('nextjs') ||
+    descLower.includes('typescript') ||
+    descLower.includes('angular') ||
+    descLower.includes('javascript') ||
+    descLower.includes('front-end') ||
+    descLower.includes('frontend');
 
   if (isGenericSoftwareRole && isDevOrEng && usesFrontendStack) {
     console.log(`[AI Match Engine] Decision: ✅ MATCH (Broad Software role matching frontend stack)`);
@@ -1325,8 +1434,8 @@ async function checkProfileMatch(title: string, description: string): Promise<{ 
   const confidence = matches / keywords.length;
   // Lenient threshold to maximize mass-applying for close matches
   const threshold = descLower.length < 100 ? 0.10 : 0.12;
-  const isMatch = confidence >= threshold; 
-  
+  const isMatch = confidence >= threshold;
+
   console.log(`[AI Match Engine] Decision: ${isMatch ? '✅ MATCH' : '❌ NO MATCH'} (Confidence: ${(confidence * 100).toFixed(0)}%)`);
   return { isMatch, confidence };
 }
@@ -1337,109 +1446,293 @@ async function checkProfileMatch(title: string, description: string): Promise<{ 
 async function runLinkedInPipeline(page: any) {
   console.log('\n[LinkedIn] Starting job application pipeline...');
   await updateAgentStatus(page, 'Searching for Jobs');
-  
+
   const keyword = getRandomSearchKeyword();
-  console.log(`[LinkedIn] Selected search keyword: "${keyword}"`);
-  
-  // Navigate to LinkedIn Job Search with f_AL=true (Easy Apply) and the selected keyword
-  const searchUrl = `https://www.linkedin.com/jobs/search/?f_AL=true&keywords=${encodeURIComponent(keyword)}&location=India&sortBy=DD&f_TPR=r604800`;
+  console.log(`[LinkedIn] 🔍 Keyword: "${keyword}"`);
+
+  // ✅ Search globally without location parameters to maximize lead volume (no location target)
+  // sortBy=DD = Date Descending (newest first always)
+  const searchUrl = `https://www.linkedin.com/jobs/search/?f_AL=true&keywords=${encodeURIComponent(keyword)}&sortBy=DD&f_TPR=r604800`;
   try {
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+    // Inject CSS to hide modals/consent popups that could block clicking cards
+    await page.addStyleTag({
+      content: `
+        .artdeco-modal, .artdeco-modal-overlay, div[role="dialog"],
+        .artdeco-modal-overlay--inset-0, div[class*="modal-overlay"],
+        div[class*="modal-backdrop"], div[class*="dialog-overlay"],
+        div[class*="upsell-modal"], div[class*="premium-modal"],
+        div[class*="promo-modal"], [class*="upsell"],
+        [class*="premium-prompt"], #cookie-consent-banner,
+        .cookie-consent-banner, div[id*="cookie"], div[class*="cookie"] {
+          display: none !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          width: 0 !important;
+          height: 0 !important;
+        }
+      `
+    }).catch(() => { });
   } catch (err: any) {
     console.warn(`[LinkedIn] Warning during initial navigation: ${err.message}`);
   }
-  await randomDelay(800, 1500);
+  await randomDelay(600, 1000);
 
   // Check if we are logged in by searching for the nav bar
   let loggedIn = await isLinkedInLoggedIn(page);
+  let loginPerformed = false;
 
   if (!loggedIn) {
+    loginPerformed = true;
     const autoLoginSuccess = await attemptLinkedInLogin(page);
     if (autoLoginSuccess) {
       loggedIn = true;
     } else {
       console.log('[LinkedIn] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
-    
-    const startTime = Date.now();
-    const timeout = 5 * 60 * 1000; // 5 minutes timeout
-    
-    while (!loggedIn && Date.now() - startTime < timeout) {
-      if (page.isClosed()) {
-        console.error('[LinkedIn] Browser page was closed. Skipping LinkedIn...');
+      await updateAgentStatus(page, 'Waiting for Login');
+
+      const startTime = Date.now();
+      const timeout = 5 * 60 * 1000; // 5 minutes timeout
+
+      while (!loggedIn && Date.now() - startTime < timeout) {
+        if (page.isClosed()) {
+          console.error('[LinkedIn] Browser page was closed. Skipping LinkedIn...');
+          return;
+        }
+        await page.waitForTimeout(2000);
+        loggedIn = await isLinkedInLoggedIn(page);
+      }
+
+      if (!loggedIn) {
+        console.error('[LinkedIn] Timeout waiting for login. Skipping LinkedIn...');
         return;
       }
-      await page.waitForTimeout(2000);
-      loggedIn = await isLinkedInLoggedIn(page);
-    }
-
-    if (!loggedIn) {
-      console.error('[LinkedIn] Timeout waiting for login. Skipping LinkedIn...');
-      return;
-    }
-    console.log('[LinkedIn] Logged in successfully!');
+      console.log('[LinkedIn] Logged in successfully!');
     }
   }
 
-  // Scroll through the job list multiple times to load all 25 job cards on the page
-  console.log('[LinkedIn] Scrolling through job list container to load all cards...');
-  await updateAgentStatus(page, 'Scrolling Job List');
-  const jobListSelector = '.jobs-search-results-list';
-  if (await page.locator(jobListSelector).count() > 0) {
-    await page.locator(jobListSelector).hover();
-    for (let s = 0; s < 4; s++) {
-      await elementScroll(page, jobListSelector, 800);
-      await page.waitForTimeout(200);
-    }
-  }
-
-  // Get job card elements
-  const jobCards = page.locator('.job-card-container');
-  const count = await jobCards.count();
-  console.log(`[LinkedIn] Found ${count} job cards in this page.`);
-
-  for (let i = 0; i < Math.min(count, 25); i++) {
+  // If we had to log in, we are no longer on the jobs page, so navigate back
+  if (loginPerformed) {
+    console.log('[LinkedIn] Navigating back to jobs search page...');
     try {
-      let card = page.locator('.job-card-container').nth(i);
-      await updateAgentStatus(page, `Opening Job Details (${i + 1}/${count})`);
-      await humanClick(page, card);
-      await randomDelay(500, 1000);
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      await randomDelay(800, 1500);
+    } catch (err: any) {
+      console.warn(`[LinkedIn] Warning returning to search page: ${err.message}`);
+    }
+  }
 
-      // Extract details with fast locator timeouts to prevent 30s stall
-      const title = (await page.locator('.job-details-jobs-unified-top-card__job-title, h1.t-24, h2.jobs-description-__title').first().textContent({ timeout: 4000 }).catch(() => '')).trim();
-      const description = (await page.locator('#job-details, .jobs-description-content__text, .jobs-description__content').first().textContent({ timeout: 4000 }).catch(() => '')).trim();
+  // ✅ SPEED+ACCURACY: 8 fast instant scrolls at 1200px to load all cards deep into the list
+  console.log('[LinkedIn] ⚡ Fast-loading job cards (8 × instant scroll)...');
+  await updateAgentStatus(page, 'Loading Job List');
+  const jobListSelector = '.jobs-search-results-list, .scaffold-layout__list, [class*="jobs-search-results"]';
+  const jobListEl = page.locator(jobListSelector).first();
+  if (await jobListEl.count() > 0) {
+    await jobListEl.hover().catch(() => { });
+    for (let s = 0; s < 8; s++) {
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel);
+        if (el) el.scrollBy(0, 1200); // instant
+      }, jobListSelector).catch(() => { });
+      await delay(150);
+    }
+  }
+  await delay(300);
 
-      // Detect company salary range for dynamic expected salary bidding
-      currentJobSalaryRange = detectSalaryRange(title + " " + description);
+  // Wait for at least one card title to render with actual text content inside the results list to prevent extracting empty cards during loading
+  await page.waitForFunction(() => {
+    const listEl = document.querySelector('.jobs-search-results-list, .scaffold-layout__list, [class*="jobs-search-results"]');
+    if (!listEl) return false;
+    const titleEl = listEl.querySelector('.job-card-list__title, .job-card-container__link, .job-card-list__title--link, [class*="job-card"] a, a[href*="/jobs/view/"]');
+    return titleEl && titleEl.textContent && titleEl.textContent.trim().length > 0;
+  }, { timeout: 8000 }).catch(() => {
+    console.warn('[LinkedIn] Timeout waiting for job card text content to render.');
+  });
 
-      // Check match
-      await updateAgentStatus(page, `Evaluating "${title.substring(0, 15)}..."`);
-      const { isMatch } = await checkProfileMatch(title, description);
-      if (!isMatch) {
-        console.log(`[LinkedIn] Skipping job: "${title}" due to low profile alignment.`);
+  // Find which selector actually matches the job cards on this page
+  const bestSelector = await page.evaluate(() => {
+    const cardSelectors = [
+      '.scaffold-layout__list-item',
+      '[data-occludable-job-id]',
+      '.jobs-search-results__list-item',
+      'li[class*="jobs-search-results__list-item"]',
+      '.job-card-container',
+      '[data-job-id]'
+    ];
+    let best = '.scaffold-layout__list-item';
+    let max = 0;
+    for (const sel of cardSelectors) {
+      const count = document.querySelectorAll(sel).length;
+      if (count > max) {
+        max = count;
+        best = sel;
+      }
+    }
+    return best;
+  }).catch(() => '.job-card-container');
+
+  console.log(`[LinkedIn] 🎯 Best job card selector identified: "${bestSelector}"`);
+
+  // ─── PHASE 1: Scroll-scan all card titles & score them (prevents virtual scroll occlusion) ───
+  const cardMeta: { index: number; title: string; company: string; confidence: number }[] = [];
+  const cardLocator = page.locator(bestSelector);
+  const cardsCount = await cardLocator.count().catch(() => 0);
+  const rawCards: { index: number; title: string; company: string }[] = [];
+
+  console.log(`[LinkedIn] ⚡ Scroll-scanning ${cardsCount} cards to extract metadata...`);
+  for (let i = 0; i < cardsCount; i++) {
+    const card = cardLocator.nth(i);
+    await card.scrollIntoViewIfNeeded().catch(() => { });
+    if (i % 5 === 0) {
+      await page.waitForTimeout(100); // small delay to trigger rendering
+    }
+    const meta = await card.evaluate((node: any) => {
+      const titleEl = node.querySelector('.job-card-list__title, .job-card-container__link, .job-card-list__title--link, [class*="job-card"] a, a[href*="/jobs/view/"]');
+      const companyEl = node.querySelector('.job-card-container__primary-description, .job-card-container__company-name, .artdeco-entity-lockup__subtitle, [class*="company"]');
+
+      let t = (titleEl as any)?.innerText || (titleEl as any)?.textContent || '';
+      let c = (companyEl as any)?.innerText || (companyEl as any)?.textContent || '';
+
+      // Clean up multiple spaces and trim
+      t = t.replace(/\s+/g, ' ').trim();
+      c = c.replace(/\s+/g, ' ').trim();
+
+      // Clean up duplicated title text from visually-hidden spans (innerText vs textContent duplication)
+      const halfLen = Math.floor(t.length / 2);
+      if (t.length > 10 && t.substring(0, halfLen) === t.substring(halfLen)) {
+        t = t.substring(0, halfLen).trim();
+      }
+
+      return { title: t, company: c };
+    }).catch(() => ({ title: '', company: '' }));
+
+    rawCards.push({ index: i, ...meta });
+  }
+
+  // Score every card locally (no AI call, instant)
+  // ✅ FIX: Includes generic 'developer' / 'engineer' with low-but-nonzero score so they aren't skipped
+  const scoringKeywords = ['react', 'next.js', 'nextjs', 'frontend', 'front-end', 'typescript', 'javascript', 'ui developer', 'ui engineer', 'web developer', 'full stack', 'fullstack', 'angular'];
+  for (const raw of rawCards) {
+    const t = raw.title.toLowerCase();
+    let score = 0;
+    if (t.includes('react') || t.includes('next.js') || t.includes('nextjs')) score += 5;
+    if (t.includes('frontend') || t.includes('front-end')) score += 4;
+    if (t.includes('typescript') || t.includes('javascript')) score += 3;
+    if (t.includes('senior') || t.includes('sr.') || t.includes('lead')) score += 2;
+    if (t.includes('ui developer') || t.includes('ui engineer') || t.includes('web developer')) score += 4;
+    if (t.includes('full stack') || t.includes('fullstack')) score += 3;
+    if (t.includes('angular')) score += 3;
+    // ✅ FIX: Give a baseline score to generic dev/engineer titles so they are NOT skipped — description check will filter them
+    if (t.includes('developer') || t.includes('engineer') || t.includes('software')) score = Math.max(score, 1);
+    if (/kolkata|calcutta|salt lake|west bengal/i.test(raw.title + ' ' + raw.company)) score += 10;
+    cardMeta.push({ ...raw, confidence: score });
+  }
+
+  // Sort by confidence (highest match first)
+  cardMeta.sort((a, b) => b.confidence - a.confidence);
+
+  const totalCards = cardMeta.length;
+  console.log(`[LinkedIn] ✅ Found ${totalCards} job cards. Top: "${cardMeta[0]?.title}" (score: ${cardMeta[0]?.confidence ?? 0})`);
+
+  if (totalCards === 0) {
+    console.warn('[LinkedIn] ⚠️ 0 job cards found — LinkedIn selector may have changed. Saving debug snapshot...');
+    try {
+      const html = await page.content();
+      fs.writeFileSync('c:\\MyPerosnalAgent\\my-personal-agent\\scratch\\linkedin_debug.html', html, 'utf-8');
+    } catch { }
+    return;
+  }
+
+  // ─── PHASE 2: Apply in confidence-sorted order ──────────────────────
+  // ✅ SPEED: Apply up to 40 jobs per run (was 25)
+  for (let rank = 0; rank < Math.min(cardMeta.length, 40); rank++) {
+    const { index: i, title: previewTitle, confidence } = cardMeta[rank];
+    try {
+      // ✅ FIX: No longer skip score-0 jobs here — checkProfileMatch on the description will filter them properly
+      // Only skip if it's clearly an excluded role (no dev/eng/tech title at all)
+      const tLower = previewTitle.toLowerCase();
+      const isObviouslyExcluded = !tLower.includes('developer') && !tLower.includes('engineer') &&
+        !tLower.includes('frontend') && !tLower.includes('react') && !tLower.includes('ui') &&
+        !tLower.includes('full') && !tLower.includes('web') && !tLower.includes('software') &&
+        !tLower.includes('javascript') && !tLower.includes('typescript') && !tLower.includes('next');
+      if (isObviouslyExcluded) {
+        console.log(`[LinkedIn] ⏩ Skipping "${previewTitle}" — clearly non-tech role.`);
         continue;
       }
 
-      // Check for Easy Apply button
-      const easyApplyButton = page.locator('button.jobs-apply-button');
-      if (await easyApplyButton.count() > 0) {
-        console.log(`[LinkedIn] Clicking 'Easy Apply' for "${title}"...`);
-        await updateAgentStatus(page, 'Opening Easy Apply');
-        await humanClick(page, easyApplyButton.first());
-        await randomDelay(500, 1000);
+      // ✅ Selector Sync: Locate and click cards using the synchronized bestSelector
+      let card = page.locator(bestSelector).nth(i);
 
-        // Fill out modal forms if they appear
-        await updateAgentStatus(page, 'Filling Application Form');
+      await updateAgentStatus(page, `Job ${rank + 1}/${Math.min(cardMeta.length, 40)}: "${previewTitle.substring(0, 20)}"`);
+      await humanClick(page, card).catch(async () => {
+        // ✅ ROBUSTNESS: Fallback — scroll to card and click via JS if Playwright click fails
+        await page.evaluate(({ sel, idx }: { sel: string, idx: number }) => {
+          const cards = Array.from(document.querySelectorAll(sel));
+          const el = cards[idx] as HTMLElement;
+          if (el) { el.scrollIntoView({ block: 'center' }); el.click(); }
+        }, { sel: bestSelector, idx: i }).catch(() => { });
+      });
+      await page.waitForTimeout(250);
+
+      // ✅ Parallel extraction of title + description (2x faster than sequential, fast 1500ms timeout)
+      const [title, description] = await Promise.all([
+        page.locator('.job-details-jobs-unified-top-card__job-title, h1.t-24, h2.jobs-description-__title, h1[class*="job-title"], h1')
+          .first().textContent({ timeout: 1500 }).catch(() => ''),
+        page.locator('#job-details, .jobs-description-content__text, .jobs-description__content, .jobs-description, [class*="description"]')
+          .first().textContent({ timeout: 1500 }).catch(() => '')
+      ]);
+      const titleClean = (title || previewTitle).trim();
+      const descClean = (description || '').trim();
+
+      // Detect salary range for dynamic bidding
+      currentJobSalaryRange = detectSalaryRange(titleClean + ' ' + descClean);
+
+      // Check match (fast local check — no AI call for basic matching)
+      await updateAgentStatus(page, `Checking: "${titleClean.substring(0, 18)}"`);
+      const { isMatch } = await checkProfileMatch(titleClean, descClean);
+      if (!isMatch) {
+        console.log(`[LinkedIn] ❌ No match: "${titleClean}"`);
+        continue;
+      }
+
+      // ✅ FIX: Expanded Easy Apply button selectors — LinkedIn updated their class names in 2025
+      const easyApplySelectors = [
+        'button.jobs-apply-button',
+        'button[aria-label*="Easy Apply" i]',
+        'button[aria-label*="Apply" i]:not([aria-label*="external" i])',
+        '.jobs-apply-button--top-card',
+        'button:has-text("Easy Apply")',
+        '[class*="jobs-apply-button"]',
+        'button[data-control-name="jobdetails_topcard_inapply"]'
+      ];
+      let easyApplyBtn = null;
+      // ✅ ACCURACY & BUGFIX: Added retry loop since Playwright count() does not wait. LinkedIn loads the button async.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        for (const sel of easyApplySelectors) {
+          const btn = page.locator(sel).filter({ visible: true }).first();
+          if (await btn.count() > 0) { easyApplyBtn = btn; break; }
+        }
+        if (easyApplyBtn) break;
+        await page.waitForTimeout(300); // short wait before retry
+      }
+
+      if (easyApplyBtn) {
+        console.log(`[LinkedIn] 📨 Easy Apply — "${titleClean}" (score: ${confidence}${/kolkata|calcutta|west bengal/i.test(titleClean) ? ' 📍 Kolkata' : ''})`);
+        await updateAgentStatus(page, 'Applying…');
+        await humanClick(page, easyApplyBtn);
+        await page.waitForTimeout(150); // ✅ SPEED: decreased from 250ms
+
         await handleLinkedInFormSteps(page);
 
-        // Proactively dismiss any post-apply success modals (Cimpress confirmation, etc.)
-        await updateAgentStatus(page, 'Checking Submission Status');
+        await updateAgentStatus(page, 'Checking Result');
         await dismissLinkedInPostApplyModal(page);
       } else {
-        console.log(`[LinkedIn] Easy Apply button not found or already applied for "${title}".`);
+        console.log(`[LinkedIn] ⏭️ No Easy Apply button for "${titleClean}" — external apply, skipping.`);
       }
 
     } catch (err: any) {
-      console.error(`[LinkedIn] Error processing job card at index ${i}:`, err.message);
+      console.error(`[LinkedIn] Error on job rank ${rank} (index ${i}):`, err.message);
     } finally {
       await closeExtraTabs(page.context());
     }
@@ -1447,7 +1740,7 @@ async function runLinkedInPipeline(page: any) {
 
   // Scout feed for direct recruiter email leads after completing job search only if feed portal is enabled
   const portalsEnv = process.env.PORTALS;
-  const enabledPortals = portalsEnv 
+  const enabledPortals = portalsEnv
     ? portalsEnv.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : ['linkedin', 'instahyre', 'indeed', 'naukri', 'feed'];
   if (enabledPortals.includes('feed')) {
@@ -1475,9 +1768,35 @@ interface FeedLead {
   emailedSubject?: string;
   outreachFailed?: boolean;
   outreachError?: string;
+  leadType?: 'email' | 'profile';  // Track B: profile-only leads (no email, just LinkedIn profile URL)
+  isKolkataLead?: boolean;
+  isAbroadLead?: boolean;
 }
 
-function saveFeedLead(lead: FeedLead) {
+function deduplicateLeads(leads: FeedLead[]): FeedLead[] {
+  const seenEmails = new Set<string>();
+  const seenProfiles = new Set<string>();
+  const uniqueLeads: FeedLead[] = [];
+  
+  // Go from newest (end of array) to oldest (beginning of array) to keep latest status
+  for (let i = leads.length - 1; i >= 0; i--) {
+    const lead = leads[i];
+    const isProfileLead = lead.leadType === 'profile';
+    if (isProfileLead) {
+      const profileKey = (lead.authorProfile || '').split('?')[0].toLowerCase().trim();
+      if (!profileKey || seenProfiles.has(profileKey)) continue;
+      seenProfiles.add(profileKey);
+    } else {
+      const emailKey = (lead.email || '').toLowerCase().trim();
+      if (!emailKey || seenEmails.has(emailKey)) continue;
+      seenEmails.add(emailKey);
+    }
+    uniqueLeads.push(lead);
+  }
+  return uniqueLeads.reverse();
+}
+
+function saveFeedLead(lead: FeedLead): boolean {
   const dataDir = path.join(__dirname, 'data');
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -1488,18 +1807,50 @@ function saveFeedLead(lead: FeedLead) {
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
       leads = JSON.parse(content);
+      leads = deduplicateLeads(leads); // Ensure database is clean and unique
     } catch (e) {
       console.error(`[LinkedIn Feed Scouter] Error parsing existing leads file:`, e);
     }
   }
-  
-  const duplicate = leads.find(l => l.email.toLowerCase() === lead.email.toLowerCase());
-  if (!duplicate) {
+
+  const COOLDOWN_DAYS = process.env.LEAD_DUPLICATE_COOLDOWN_DAYS
+    ? parseInt(process.env.LEAD_DUPLICATE_COOLDOWN_DAYS)
+    : 15; // Set duplicate/email cooldown to 15 days as requested by user
+  const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+
+  // Track B: Profile leads dedup by authorProfile URL
+  const isProfileLead = lead.leadType === 'profile';
+  const existing = isProfileLead
+    ? leads.find(l => l.authorProfile && lead.authorProfile && l.authorProfile.split('?')[0].toLowerCase() === lead.authorProfile.split('?')[0].toLowerCase())
+    : leads.find(l => l.email.toLowerCase() === lead.email.toLowerCase());
+
+  const dedupKey = isProfileLead ? lead.authorProfile : lead.email;
+
+  if (!existing) {
+    // Brand new lead — always save
     leads.push(lead);
     fs.writeFileSync(filePath, JSON.stringify(leads, null, 2), 'utf-8');
-    console.log(`[LinkedIn Feed Scouter] Saved new lead: ${lead.email} (${lead.authorName})`);
+    console.log(`[LinkedIn Feed Scouter] ✅ Saved NEW ${isProfileLead ? 'PROFILE' : 'EMAIL'} lead: ${dedupKey} (${lead.authorName})`);
+    return true;
   } else {
-    console.log(`[LinkedIn Feed Scouter] Duplicate lead ignored: ${lead.email}`);
+    // Check both when the lead was extracted and when it was last emailed to respect 15-day cooldown from both actions
+    const lastActionTime = Math.max(
+      new Date(existing.extractedAt || 0).getTime(),
+      existing.emailedAt ? new Date(existing.emailedAt).getTime() : 0
+    );
+    const ageMs = Date.now() - lastActionTime;
+    if (ageMs > COOLDOWN_MS) {
+      // Old lead — refresh it so it can be re-contacted
+      const idx = leads.indexOf(existing);
+      leads[idx] = lead;
+      leads = deduplicateLeads(leads); // Re-deduplicate
+      fs.writeFileSync(filePath, JSON.stringify(leads, null, 2), 'utf-8');
+      console.log(`[LinkedIn Feed Scouter] 🔄 Refreshed old ${isProfileLead ? 'profile' : 'email'} lead (${Math.round(ageMs / 86400000)}d ago): ${dedupKey}`);
+      return true;
+    } else {
+      console.log(`[LinkedIn Feed Scouter] ⏭ Skipping recent duplicate: ${dedupKey} (seen ${Math.round(ageMs / 3600000)}h ago)`);
+      return false;
+    }
   }
 }
 
@@ -1507,10 +1858,10 @@ function saveFeedLead(lead: FeedLead) {
 function parseLeadPost(lead: any) {
   const text = lead.postText || '';
   const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean);
-  
+
   // 1. Extract Role Title
   let roleTitle = '';
-  
+
   // Try common headings for roles
   let openPositionsIndex = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -1520,7 +1871,7 @@ function parseLeadPost(lead: any) {
       break;
     }
   }
-  
+
   // Look for lines after "Open Positions" or similar heading that look like roles
   if (openPositionsIndex !== -1 && openPositionsIndex < lines.length - 1) {
     for (let j = openPositionsIndex + 1; j < Math.min(lines.length, openPositionsIndex + 4); j++) {
@@ -1531,7 +1882,7 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   // If not found, look for "Hiring:" or "We're Hiring" patterns directly
   if (!roleTitle) {
     for (const line of lines) {
@@ -1549,14 +1900,14 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   // Look for any line containing common job titles in the first 5 lines
   if (!roleTitle) {
     const commonTitles = [
-      'Frontend Developer', 'React Developer', 'Full Stack Developer', 'Software Engineer', 
-      'QA Tester', 'Manual Testing', 'QA Engineer', 'Business Consultant', 'VBCS Developer', 
-      'Brand Designer', 'Business Development', 'Customer Support', 'Growth Manager', 
-      'Service Engineer', 'Mobile Developer', 'React Native', 'Physical Design', 'Python Developer', 
+      'Frontend Developer', 'React Developer', 'Full Stack Developer', 'Software Engineer',
+      'QA Tester', 'Manual Testing', 'QA Engineer', 'Business Consultant', 'VBCS Developer',
+      'Brand Designer', 'Business Development', 'Customer Support', 'Growth Manager',
+      'Service Engineer', 'Mobile Developer', 'React Native', 'Physical Design', 'Python Developer',
       'Laravel Developer', 'PHP Developer'
     ];
     for (let i = 0; i < Math.min(lines.length, 5); i++) {
@@ -1570,7 +1921,7 @@ function parseLeadPost(lead: any) {
       if (roleTitle) break;
     }
   }
-  
+
   // If still not found, check if there's "Open to Work | <role>"
   if (!roleTitle) {
     const openToWorkLine = lines.find((l: string) => l.includes('Open to Work'));
@@ -1590,13 +1941,13 @@ function parseLeadPost(lead: any) {
       roleTitle = 'Software Engineer / Developer';
     }
   }
-  
+
   // Cleanup role title
   roleTitle = roleTitle.replace(/^[^a-zA-Z0-9]+/, '').replace(/[^a-zA-Z0-9)]+$/, '').trim();
 
   // 2. Extract Company Name
   let company = lead.companyName || 'Hiring Manager';
-  
+
   if (company === 'Hiring Manager' && lead.authorProfile && lead.authorProfile.includes('/company/')) {
     const match = lead.authorProfile.match(/\/company\/([^/]+)/);
     if (match && match[1]) {
@@ -1606,7 +1957,7 @@ function parseLeadPost(lead: any) {
         .join(' ');
     }
   }
-  
+
   if (company === 'Hiring Manager') {
     for (let i = 0; i < Math.min(lines.length, 4); i++) {
       const line = lines[i];
@@ -1632,7 +1983,7 @@ function parseLeadPost(lead: any) {
       }
     }
   }
-  
+
   if (company === 'Hiring Manager' && lead.authorName && !lead.authorName.toLowerCase().includes('recruiter')) {
     company = lead.authorName.split(',')[0].trim();
   }
@@ -1670,7 +2021,8 @@ function parseLeadPost(lead: any) {
     roleTitle,
     company,
     vacancies,
-    experience
+    experience,
+    isAbroadLead: lead.isAbroadLead || false
   };
 }
 
@@ -1749,86 +2101,179 @@ ${postText}
 }
 
 // Evaluates if a job post matches Shatadal's background (allowing a relaxed 30-45% overlap) using Groq/Llama 3
+// ✅ SPEED: AI response cache — same post fingerprint never hits Groq twice
+const _aiMatchCache = new Map<string, boolean>();
+
 async function checkJobMatchWithAI(postText: string, parsedInfo: any): Promise<boolean> {
   const client = getGroqClient();
   const postTextLower = postText.toLowerCase();
+  const roleTitleLower = (parsedInfo.roleTitle || '').toLowerCase();
+
+  // 0. HARD BLOCK: Internship / Trainee posts — reject immediately
+  const isInternshipPost =
+    postTextLower.includes('internship') ||
+    postTextLower.includes('trainee') ||
+    postTextLower.includes('apprentice') ||
+    postTextLower.includes('stipend') ||
+    /\bhiring\s+intern/i.test(postTextLower) ||
+    /\bintern\s+(?:position|role|opportunity|opening|program)/i.test(postTextLower);
+
+  if (isInternshipPost) {
+    console.log(`[AI Match Guard] ❌ HARD BLOCK: Internship/Trainee post rejected.`);
+    return false;
+  }
+
+  // 1. Strict Exclusions for specific backend/QA/unrelated roles in the Title
+  const isExcludedTitle =
+    (/\bjava\b/i.test(roleTitleLower) && !/\bjavascript\b/i.test(roleTitleLower)) ||
+    /\bpython\b/i.test(roleTitleLower) ||
+    /\bspringboot\b/i.test(roleTitleLower) ||
+    /\bspring\s*boot\b/i.test(roleTitleLower) ||
+    /\bgolang\b/i.test(roleTitleLower) ||
+    /\bdevops\b/i.test(roleTitleLower) ||
+    /\bqa\b/i.test(roleTitleLower) ||
+    /\btester\b/i.test(roleTitleLower) ||
+    /\btesting\b/i.test(roleTitleLower) ||
+    /\bphp\b/i.test(roleTitleLower) ||
+    /\blaravel\b/i.test(roleTitleLower) ||
+    /\bwordpress\b/i.test(roleTitleLower) ||
+    /\bflutter\b/i.test(roleTitleLower) ||
+    /\bandroid\b/i.test(roleTitleLower) ||
+    /\bios\b/i.test(roleTitleLower) ||
+    /\bswift\b/i.test(roleTitleLower) ||
+    /\b\.net\b/i.test(roleTitleLower) ||
+    /\bdotnet\b/i.test(roleTitleLower) ||
+    /\bc#\b/i.test(roleTitleLower) ||
+    (/\bbackend\b/i.test(roleTitleLower) && !/\bfrontend\b/i.test(roleTitleLower) && !/\bfront-end\b/i.test(roleTitleLower));
+
+  if (isExcludedTitle) {
+    console.log(`[AI Match Guard] Skipping role "${parsedInfo.roleTitle}" - Excluded keyword in role title.`);
+    return false;
+  }
+
+  // 2. Reject Full Stack roles utilizing heavy backend stacks (Java/Python/PHP/DotNet/SpringBoot/etc.)
+  const isFullStack = roleTitleLower.includes('full stack') || roleTitleLower.includes('fullstack') || postTextLower.includes('full stack') || postTextLower.includes('fullstack');
+  const hasBackendStack =
+    (/\bjava\b/i.test(postTextLower) && !/\bjavascript\b/i.test(postTextLower)) ||
+    /\bpython\b/i.test(postTextLower) ||
+    /\bspringboot\b/i.test(postTextLower) ||
+    /\bspring\s*boot\b/i.test(postTextLower) ||
+    /\b\.net\b/i.test(postTextLower) ||
+    /\bdotnet\b/i.test(postTextLower) ||
+    /\bc#\b/i.test(postTextLower) ||
+    /\bphp\b/i.test(postTextLower) ||
+    /\blaravel\b/i.test(postTextLower) ||
+    /\bgolang\b/i.test(postTextLower) ||
+    /\bdjango\b/i.test(postTextLower);
+
+  if (isFullStack && hasBackendStack) {
+    console.log(`[AI Match Guard] Skipping Full Stack role "${parsedInfo.roleTitle}" due to Java/Python/PHP/DotNet backend stack.`);
+    return false;
+  }
+
+  // 3. Reject if the post text explicitly indicates a Java or Python developer role
+  const hasExcludedDeveloperPhrase =
+    /\bjava\s*(?:developer|engineer|programmer|specialist|lead|architect)\b/i.test(postTextLower) ||
+    /\bpython\s*(?:developer|engineer|programmer|specialist|lead|architect)\b/i.test(postTextLower) ||
+    /\bphp\s*(?:developer|engineer|programmer|specialist|lead|architect)\b/i.test(postTextLower) ||
+    /\blaravel\s*(?:developer|engineer|programmer|specialist|lead|architect)\b/i.test(postTextLower) ||
+    /\bdevops\s*(?:developer|engineer|programmer|specialist|lead|admin)\b/i.test(postTextLower) ||
+    /\bqa\s*(?:tester|engineer|specialist|lead)\b/i.test(postTextLower) ||
+    /\bautomation\s*(?:tester|engineer|specialist)\b/i.test(postTextLower);
+
+  if (hasExcludedDeveloperPhrase) {
+    console.log(`[AI Match Guard] Skipping role "${parsedInfo.roleTitle}" - Contains excluded developer role phrase in post.`);
+    return false;
+  }
 
   // Shatadal's core stack checking (Relaxed: matches React/Next, general frontend, or React Native)
   const coreSkills = ['react', 'next.js', 'nextjs', 'angular', 'typescript', 'frontend', 'front-end', 'ui developer', 'ui engineer', 'web developer', 'react native', 'react-native'];
   const matchesCore = coreSkills.some(skill => postTextLower.includes(skill));
 
-  // Exclude only strictly unrelated positions (DevOps, QA, pure backend with no JS frontend involvement, sales, HR)
+  // Exclude only strictly unrelated positions
   const backendOnlyKeywords = [
-    'python developer', 'django developer', 'java developer', 'springboot', 'golang developer', 
-    'devops engineer', 'qa tester', 'manual tester', 'automation tester', 'sales executive', 
-    'hr manager', 'php developer', 'laravel developer', 'wordpress developer', 'flutter developer', 
-    'android developer', 'ios developer', 'swift developer', 
+    'python developer', 'django developer', 'java developer', 'springboot', 'golang developer',
+    'devops engineer', 'qa tester', 'manual tester', 'automation tester', 'sales executive',
+    'hr manager', 'php developer', 'laravel developer', 'wordpress developer', 'flutter developer',
+    'android developer', 'ios developer', 'swift developer',
     'business analyst', 'product manager', 'scrum master', 'data scientist', 'system administrator'
   ];
-  
-  // If post contains backend/mobile keywords but also mentions react/frontend, it is allowed (partial overlap)
-  const isExcluded = backendOnlyKeywords.some(keyword => postTextLower.includes(keyword)) && 
-                     !postTextLower.includes('react') && 
-                     !postTextLower.includes('frontend') && 
-                     !postTextLower.includes('front-end') && 
-                     !postTextLower.includes('next.js') && 
-                     !postTextLower.includes('nextjs');
 
-  // Pre-filter: If it doesn't match our stack locally, skip immediately to save AI tokens and time
+  const isExcluded = backendOnlyKeywords.some(keyword => postTextLower.includes(keyword)) &&
+    !postTextLower.includes('react') &&
+    !postTextLower.includes('frontend') &&
+    !postTextLower.includes('front-end') &&
+    !postTextLower.includes('next.js') &&
+    !postTextLower.includes('nextjs');
+
   if (!matchesCore || isExcluded) {
     console.log(`[AI Match Guard] Skipping role "${parsedInfo.roleTitle}" - Local stack check mismatch.`);
     return false;
   }
 
-  // If Groq client is not available, return true since it passed our local stack validation
+  // ✅ HARD EXPERIENCE CAP: Reject any post that explicitly requires 8+ years
+  const strictExpRegex = /\b([89]|1[0-9]|20)\s*(?:\+)?\s*(?:years?|yrs?)(?:\s+(?:of\s+)?(?:experience|exp))?/gi;
+  const strictMatch = postText.match(strictExpRegex);
+  if (strictMatch) {
+    console.log(`[AI Match Guard] ❌ HARD BLOCK: "${strictMatch[0].trim()}" exceeds 7-year cap. Skipping.`);
+    return false;
+  }
+
   if (!client) {
     console.log(`[AI Match Guard] Groq offline. Local match passed for "${parsedInfo.roleTitle}".`);
     return true;
   }
 
-  console.log(`[AI Match Guard] Evaluating job alignment with Groq (30-45% Match Target, Max 8 Years Exp)...`);
+  // ✅ SPEED: Check cache before hitting Groq API
+  const cacheKey = postText.trim().substring(0, 300);
+  if (_aiMatchCache.has(cacheKey)) {
+    const cached = _aiMatchCache.get(cacheKey)!;
+    console.log(`[AI Match Guard] ⚡ Cache hit — "${cached ? 'YES' : 'NO'}" for "${parsedInfo.roleTitle}"`);
+    return cached;
+  }
+
+  console.log(`[AI Match Guard] Evaluating with Groq (30-45% Match Target, Max 7 Years Exp)...`);
   const prompt = `You are a recruitment assistant verifying if a job description matches the profile of Shatadal Sundar Sinha. We want to be inclusive and match if there is at least a 30-45% overlap with his skillset.
-  
+
 Candidate Profile:
 - Core Role: Senior Frontend Developer / UI Engineer
 - Core Skills: React.js, Next.js, TypeScript, JavaScript (ES6+), Angular, HTML5, CSS3, Material UI (MUI), Ant Design, Tailwind CSS
-- Experience: ~5 years. Target matching jobs requiring 1 to 8 years of experience.
+- Experience: ~5 years. Target matching jobs requiring 1 to 7 years of experience.
 - Target Areas: Frontend Development, React/Next.js UI, Angular UI modules, React Native mobile apps, or Full-Stack developer positions (using React/Next on frontend and Node.js on backend).
 
 Match Criteria:
 - YES: The job description requires React, Next.js, TypeScript, general Frontend, Angular, UI development, React Native, or Full-Stack React development.
-- YES: The required experience is in the range of 1 to 8 years (e.g. 2 years, 3 years, 5 years, or up to 7-8 years).
-- YES: If the post is very short, or does not specify the required years of experience, assume it is acceptable and return YES (unless it is for a Principal/Lead/Architect role demanding 9+ years).
-- NO: The job requires MORE than 8 years of experience (e.g., 9+, 10+, 12+ years of experience, or Principal/Lead/Architect roles demanding 9+ years).
-- NO: The job is exclusively backend (e.g. Java Spring Boot, Django, Python with no frontend mention), DevOps, QA/testing, sales, recruitment, or non-technical.
+- YES: The required experience is in the range of 1 to 7 years.
+- YES: If the post is very short or does not specify required experience, assume acceptable and return YES (unless it is for a Principal/Lead/Architect role demanding 8+ years).
+- NO: The job requires MORE than 7 years of experience.
+- NO: The job is exclusively backend (Java, Python, PHP, .NET), DevOps, QA/testing, sales, recruitment, or non-technical.
+- NO: The job is primarily a Java Developer, Python Developer, PHP Developer, .NET Developer, DevOps, QA/Testing, or non-technical role (even if React/Frontend is mentioned as a minor skill).
+- NO: The job is a Full Stack role that primarily uses Java, Python, PHP, or .NET for the backend (only allow Full Stack if it uses Node.js/Express or is primarily focused on React/Next.js/Frontend).
 
 Job Description/Post Text:
 """
-${postText}
+${postText.substring(0, 600)}
 """
 
-Instructions:
-Evaluate the job post and respond with "YES" if it meets the 30-45% matching threshold AND (requires 8 years of experience or less OR does not specify experience).
-Otherwise, respond with "NO".
-Output ONLY "YES" or "NO". Do not include any explanation or extra text.`;
+Output ONLY "YES" or "NO". No explanation.`;
 
   try {
     const chatCompletion = await client.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model: 'llama-3.1-8b-instant',
       temperature: 0.1,
-      max_tokens: 15,
+      max_tokens: 10,
     });
 
     const rawResponse = (chatCompletion.choices[0]?.message?.content || '').trim().toUpperCase();
-    const words = rawResponse.replace(/[^A-Z]/g, ' ').split(/\s+/);
-    const isYes = words.includes('YES');
+    const isYes = rawResponse.startsWith('YES');
 
-    console.log(`[AI Match Guard] Match Decision: "${isYes ? 'YES' : 'NO'}" (raw response: "${rawResponse}") for post of role: "${parsedInfo.roleTitle}"`);
+    console.log(`[AI Match Guard] Decision: "${isYes ? 'YES' : 'NO'}" for "${parsedInfo.roleTitle}"`);
+    _aiMatchCache.set(cacheKey, isYes);
     return isYes;
   } catch (err: any) {
-    console.warn(`[AI Match Guard] Groq error during job matching: ${err.message}. Defaulting to local validation.`);
-    return true; // Default to true since local pre-filter passed
+    console.warn(`[AI Match Guard] Groq error: ${err.message}. Defaulting to local pass.`);
+    return true;
   }
 }
 
@@ -1837,14 +2282,28 @@ async function generateTailoredCoverLetter(postText: string, parsedInfo: any): P
   const client = getGroqClient();
   const recipient = parsedInfo.authorName && parsedInfo.authorName !== 'Recruiter' ? parsedInfo.authorName : 'Hiring Team';
 
+  // Detect if this is a Kolkata-based opportunity for hyper-local email angle
+  const isKolkataCompany = /kolkata|calcutta|salt lake|sector v|sector-v|rajarhat|new town|newtown|howrah|west bengal/i.test(
+    (parsedInfo.company || '') + ' ' + postText
+  );
+
+  const isAbroadLead = parsedInfo.isAbroadLead || false;
+
+  const locationInstructions = isAbroadLead
+    ? `\n6. IMPORTANT — This is an international/abroad role (outside India). Shatadal is seeking an "abroad remote" role. You MUST explicitly mention in the email that Shatadal is specifically looking for remote opportunities from abroad / international remote roles, and is fully comfortable working asynchronously across different time zones (e.g. US, Europe, or Gulf time zones).`
+    : (isKolkataCompany
+      ? `\n6. IMPORTANT — This company is based in Kolkata. Shatadal is ALSO based in Kolkata (Kolkata, West Bengal, 700017). You MUST mention: (a) he is a local Kolkata-based candidate so no relocation is needed, (b) he is an immediate joiner (0 days notice), (c) he is already familiar with the Kolkata tech ecosystem (Sector V, Salt Lake, Rajarhat). This is a major competitive advantage \u2514 make it prominent in the email.`
+      : '');
+
   if (client) {
-    console.log(`[AI Outreach Engine] Groq client active. Generating fully tailored cover letter...`);
+    console.log(`[AI Outreach Engine] Groq client active. Generating fully tailored cover letter${isKolkataCompany ? ' \ud83d\udccd (Kolkata local angle)' : ''}${isAbroadLead ? ' ✈️ (Abroad Remote angle)' : ''}...`);
     const prompt = `You are an AI assistant helping Shatadal Sundar Sinha (Senior Frontend Developer) write a highly tailored, professional outreach email to a recruiter or hiring manager.
 
 Candidate Background:
 - Name: Shatadal Sundar Sinha
 - Core Role: Senior Frontend Developer / Senior UI Developer / UI Engineer
 - Experience: ~5 years (specializing in React, Next.js, TypeScript, JavaScript, HTML, CSS, and Angular)
+- Location: Kolkata, West Bengal, India (700017) — LOCAL candidate for Kolkata companies
 - Key Projects:
   1. WebSkitters Academy (Student CRM Portal - Frontend Lead): Built frontend from scratch using Next.js, TypeScript, and Material UI. Integrated Razorpay, Cashfree, and Instamojo. Achieved sub-2s LCP for improved user retention.
   2. Qpulse AI-Powered Resume Builder: Next.js + TypeScript AI builder and dashboard, integrated AI chatbot and roadmap APIs. Assisted in Node.js REST APIs.
@@ -1867,7 +2326,7 @@ Instructions:
 2. Speak in first person ("I have...", "I am...", "My experience..."). Make it sound natural, direct, and conversational.
 3. Read the Job Description carefully. Highlight the candidate's skills, technologies, and projects that directly align with the JD's requirements.
 4. Mention the candidate's personal AI Agent (shatadalpersonalassistent.vercel.app) as an example of their work.
-5. The cover letter MUST start with "Dear ${recipient}," and end exactly with the signature block:
+5. The cover letter MUST start with "Dear ${recipient}," and end exactly with the signature block:${locationInstructions}
 
 Best regards,
 Shatadal Sundar Sinha
@@ -1899,13 +2358,143 @@ Do NOT output any subject line, notes, intro, or wrap the cover letter in extra 
   // Fallback to template if AI generation fails or is offline
   console.log(`[AI Outreach Engine] Falling back to standard template-based cover letter...`);
   const tailoredParagraph = await generateJDTailoredParagraph(postText);
-  return `Dear ${recipient},\n\nI hope this email finds you well.\n\nI came across your open requirements for a ${parsedInfo.roleTitle || 'Frontend Developer'} and wanted to share my profile for this position. I am a Senior Frontend Developer & UI Engineer with 5 years of experience specializing in building high-performance web applications using React, Next.js, and TypeScript.\n\n${tailoredParagraph}\n\nIn my previous roles, I have designed and delivered scalable student CRM systems, AI-powered resume builders, and browser-automation platforms. I specialize in web optimization, clean responsive UI design, and pixel-perfect implementation.\n\nI would love to connect and discuss how my expertise in modern frontend technologies can add value to your team. You can also interact with my personal AI agent at shatadalpersonalassistent.vercel.app to query my background directly.\n\nLooking forward to hearing from you.\n\nBest regards,\nShatadal Sundar Sinha\nEmail: shatadal17@gmail.com\nPhone: +91 70636 44658 / +91 93824 68250\nKolkata, West Bengal, India\nPersonal AI Agent: shatadalpersonalassistent.vercel.app`;
+
+  let intro = `I came across your open requirements for a ${parsedInfo.roleTitle || 'Frontend Developer'} and wanted to share my profile for this position. I am a Senior Frontend Developer & UI Engineer with 5 years of experience specializing in building high-performance web applications using React, Next.js, and TypeScript.`;
+  if (isAbroadLead) {
+    intro = `I came across your open requirements for a ${parsedInfo.roleTitle || 'Frontend Developer'} and wanted to share my profile. I am a Senior Frontend Developer & UI Engineer with 5 years of experience specializing in building high-performance web applications using React, Next.js, and TypeScript. I am specifically looking for remote opportunities from abroad / international remote roles and am comfortable working asynchronously across different time zones.`;
+  }
+
+  return `Dear ${recipient},\n\nI hope this email finds you well.\n\n${intro}\n\n${tailoredParagraph}\n\nIn my previous roles, I have designed and delivered scalable student CRM systems, AI-powered resume builders, and browser-automation platforms. I specialize in web optimization, clean responsive UI design, and pixel-perfect implementation.\n\nI would love to connect and discuss how my expertise in modern frontend technologies can add value to your team. You can also interact with my personal AI agent at shatadalpersonalassistent.vercel.app to query my background directly.\n\nLooking forward to hearing from you.\n\nBest regards,\nShatadal Sundar Sinha\nEmail: shatadal17@gmail.com\nPhone: +91 70636 44658 / +91 93824 68250\nKolkata, West Bengal, India\nPersonal AI Agent: shatadalpersonalassistent.vercel.app`;
 }
 
-// Automatically triggers outreach emails for newly collected leads
-async function autoSendFeedOutreach() {
+// Connects to IMAP inbox to fetch all sender emails and their last received timestamp since 30 days ago
+async function getRecentRepliedSenders(config: any): Promise<Map<string, number>> {
+  return new Promise((resolve) => {
+    const senderMap = new Map<string, number>();
+    
+    if (!config || !config.username || !config.password) {
+      console.warn(`[IMAP Check] Missing credentials for IMAP check.`);
+      return resolve(senderMap);
+    }
+
+    let imapHost = 'imap.gmail.com';
+    if (config.host) {
+      if (config.host.includes('gmail.com')) {
+        imapHost = 'imap.gmail.com';
+      } else {
+        imapHost = config.host.replace(/^smtp\./i, 'imap.');
+      }
+    }
+
+    console.log(`[IMAP Check] Connecting to ${imapHost} for user ${config.username}...`);
+
+    const imap = new Imap({
+      user: config.username,
+      password: config.password,
+      host: imapHost,
+      port: 993,
+      tls: true,
+      tlsOptions: { rejectUnauthorized: false }
+    });
+
+    const timeout = setTimeout(() => {
+      console.warn(`[IMAP Check] Connection timed out after 15 seconds.`);
+      imap.destroy();
+      resolve(senderMap);
+    }, 15000);
+
+    imap.once('ready', () => {
+      imap.openBox('INBOX', true, (err) => {
+        if (err) {
+          console.warn(`[IMAP Check] Error opening INBOX:`, err.message);
+          clearTimeout(timeout);
+          imap.end();
+          return resolve(senderMap);
+        }
+
+        // Search for emails in the last 30 days to check for replies
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const imapDateStr = `${String(thirtyDaysAgo.getDate()).padStart(2, '0')}-${monthNames[thirtyDaysAgo.getMonth()]}-${thirtyDaysAgo.getFullYear()}`;
+
+        imap.search([['SINCE', imapDateStr]], (searchErr, results) => {
+          if (searchErr || !results || results.length === 0) {
+            if (searchErr) console.warn(`[IMAP Check] Search error:`, searchErr.message);
+            clearTimeout(timeout);
+            imap.end();
+            return resolve(senderMap);
+          }
+
+          const fetchOptions = {
+            bodies: 'HEADER.FIELDS (FROM DATE)'
+          };
+
+          const f = imap.fetch(results, fetchOptions);
+
+          f.on('message', (msg) => {
+            msg.on('body', (stream) => {
+              let buffer = '';
+              stream.on('data', (chunk) => {
+                buffer += chunk.toString('utf8');
+              });
+              stream.once('end', () => {
+                const lines = buffer.split('\r\n');
+                let fromVal = '';
+                let dateVal = '';
+                for (const line of lines) {
+                  if (line.toLowerCase().startsWith('from:')) {
+                    fromVal = line.substring(5).trim();
+                  } else if (line.toLowerCase().startsWith('date:')) {
+                    dateVal = line.substring(5).trim();
+                  }
+                }
+                
+                if (fromVal) {
+                  const match = fromVal.match(/<([^>]+)>/) || fromVal.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                  const email = match ? match[1].trim().toLowerCase() : fromVal.trim().toLowerCase();
+                  const timestamp = dateVal ? new Date(dateVal).getTime() : Date.now();
+                  
+                  const existingTime = senderMap.get(email) || 0;
+                  if (timestamp > existingTime) {
+                    senderMap.set(email, timestamp);
+                  }
+                }
+              });
+            });
+          });
+
+          f.once('error', (fetchErr) => {
+            console.warn(`[IMAP Check] Fetch error:`, fetchErr.message);
+          });
+
+          f.once('end', () => {
+            clearTimeout(timeout);
+            imap.end();
+            resolve(senderMap);
+          });
+        });
+      });
+    });
+
+    imap.once('error', (err) => {
+      console.warn(`[IMAP Check] IMAP error:`, err.message);
+      clearTimeout(timeout);
+      resolve(senderMap);
+    });
+
+    imap.once('end', () => {
+      // ended
+    });
+
+    imap.connect();
+  });
+}
+
+// Automatically triggers outreach emails for NEWLY collected leads only (this run)
+// Pass the set of emails found in this run — only those will be emailed, never old pending ones.
+async function autoSendFeedOutreach(newLeadsThisRunEmails?: Set<string>) {
   console.log(`\n[LinkedIn Feed Scouter] 📬 Starting automatic outreach for newly collected leads...`);
-  
+
   const dataDir = path.join(__dirname, 'data');
   const leadsFilePath = path.join(dataDir, 'feed_leads.json');
   const configFilePath = path.join(dataDir, 'email_config.json');
@@ -1940,19 +2529,188 @@ async function autoSendFeedOutreach() {
   try {
     const leadsContent = fs.readFileSync(leadsFilePath, 'utf-8');
     leads = JSON.parse(leadsContent);
+    leads = deduplicateLeads(leads); // Deduplicate to keep only unique emails and profiles
   } catch (e) {
     console.error(`[LinkedIn Feed Scouter] Error parsing leads file:`, e);
     return;
   }
 
-  // 3. Find pending leads (not emailed yet)
-  const pendingLeads = leads.filter(l => !l.emailedAt);
+  // Filter out any invalid emails from the list of leads to clean up the DB
+  const initialCount = leads.length;
+  leads = leads.filter(l => {
+    const email = (l.email || '').trim().toLowerCase();
+
+    // Reject empty
+    if (!email) return false;
+
+    // Reject consecutive dots
+    if (email.includes('..') || email.startsWith('.') || email.endsWith('.')) {
+      return false;
+    }
+
+    // Split domain
+    const parts = email.split('@');
+    if (parts.length !== 2) return false;
+
+    const domain = parts[1];
+    const domainParts = domain.split('.');
+    if (domainParts.length < 2) return false;
+
+    const tld = domainParts[domainParts.length - 1];
+    if (tld.length < 2 || tld.length > 15) return false;
+
+    // Specific block for the buggy parsed email domain
+    if (tld === 'we' && domain === 'odiin.we') return false;
+
+    return true;
+  });
+
+  if (leads.length !== initialCount) {
+    console.log(`[LinkedIn Feed Scouter] Cleaned up ${initialCount - leads.length} invalid/obfuscated emails from leads database.`);
+    try {
+      fs.writeFileSync(leadsFilePath, JSON.stringify(leads, null, 2), 'utf-8');
+    } catch (saveErr: any) {
+      console.warn(`[LinkedIn Feed Scouter] Failed to save cleaned leads database:`, saveErr.message);
+    }
+  }
+
+  // 3. OUTREACH GATE: Only run if scraper actually found new leads this run.
+  //    If scraper was broken (0 new leads) → don't email anyone.
+  //    If scraper found leads → email ALL pending leads (new ones + old ones never emailed).
+  if (!newLeadsThisRunEmails || newLeadsThisRunEmails.size === 0) {
+    console.log(`[LinkedIn Feed Scouter] ⛔ No new leads found this run — skipping outreach to avoid emailing on broken runs.`);
+    return;
+  }
+
+  console.log(`[LinkedIn Feed Scouter] ✅ ${newLeadsThisRunEmails.size} new lead(s) found this run — now emailing ALL pending leads (new + old uncontacted).`);
+
+  // Connect to IMAP to retrieve all email senders and their last email timestamp
+  console.log(`[LinkedIn Feed Scouter] Checking inbox for recruiter replies before doing outreach...`);
+  let repliedSenders = new Map<string, number>();
+  let imapSuccess = false;
+  try {
+    repliedSenders = await getRecentRepliedSenders(config);
+    imapSuccess = true;
+    console.log(`[LinkedIn Feed Scouter] IMAP reply check completed. Found ${repliedSenders.size} unique senders in inbox.`);
+  } catch (imapErr: any) {
+    console.warn(`[LinkedIn Feed Scouter] ⚠️ IMAP reply check failed:`, imapErr.message);
+  }
+
+  let leadsUpdated = false;
+  const COOLDOWN_DAYS = 15; // Set outreach cooldown to 15 days as requested by user
+  const COOLDOWN_MS = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+  const pendingLeads = leads
+    .filter(l => {
+      // 1. If already emailed recently (< 10 days), it is NOT pending. Skip immediately!
+      if (l.emailedAt) {
+        const lastEmailed = new Date(l.emailedAt).getTime();
+        const ageMs = Date.now() - lastEmailed;
+        if (ageMs <= COOLDOWN_MS) {
+          return false;
+        }
+
+        // 1b. If emailed > 10 days ago, but the recruiter replied after we emailed them,
+        // we must NOT email them again (skip permanently).
+        if (imapSuccess) {
+          const emailLower = (l.email || '').toLowerCase().trim();
+          if (repliedSenders.has(emailLower)) {
+            const replyTime = repliedSenders.get(emailLower) || 0;
+            if (replyTime > lastEmailed) {
+              console.log(`[LinkedIn Feed Scouter] ⏭ Skipping follow-up for ${l.email}: recruiter replied on ${new Date(replyTime).toISOString()}`);
+              return false;
+            }
+          }
+        } else {
+          // If IMAP failed, to be safe, we DO NOT send follow-up emails to already-emailed contacts
+          // to prevent double-emailing if they had replied. Only email brand new leads.
+          console.log(`[LinkedIn Feed Scouter] ⏭ Skipping follow-up for ${l.email} (IMAP check failed, skipping follow-up to prevent duplicate outreach)`);
+          return false;
+        }
+      }
+
+      // 2. Failsafe check: only for leads that are actually eligible to be emailed
+      const textLower = (l.postText || '').toLowerCase();
+      const isFrontendRole =
+        /\bfrontend\b/i.test(textLower) ||
+        /\bfront-end\b/i.test(textLower) ||
+        /\bfront\s+end\b/i.test(textLower) ||
+        /\breact\b/i.test(textLower) ||
+        /\bnext\.js\b/i.test(textLower) ||
+        /\bnextjs\b/i.test(textLower) ||
+        /\bui\s+developer\b/i.test(textLower) ||
+        /\bui\s+engineer\b/i.test(textLower);
+
+      // Webskitters block in failsafe
+      const isWebskitters = textLower.includes('webskitters') || (l.email || '').toLowerCase().includes('webskitters');
+      if (isWebskitters) {
+        if (l.emailedSubject !== 'Skipped: Webskitters') {
+          console.log(`[LinkedIn Feed Scouter] 🛑 Blocked Webskitters email: ${l.email}`);
+          l.emailedAt = new Date().toISOString();
+          l.emailedSubject = 'Skipped: Webskitters';
+          leadsUpdated = true;
+        }
+        return false;
+      }
+
+      let isJavaOrPython = false;
+      if (isFrontendRole) {
+        // If it is a frontend role, only skip if it's primarily a backend/non-JS job
+        isJavaOrPython =
+          (/\bjava\b/i.test(textLower) && !/\bjavascript\b/i.test(textLower) && !/\breact\b/i.test(textLower)) ||
+          (/\bpython\b/i.test(textLower) && !/\breact\b/i.test(textLower)) ||
+          (/\bphp\b/i.test(textLower) && !/\breact\b/i.test(textLower));
+      } else {
+        // Full strict failsafe for non-frontend roles
+        isJavaOrPython =
+          (/\bjava\b/i.test(textLower) && !/\bjavascript\b/i.test(textLower)) ||
+          /\bpython\b/i.test(textLower) ||
+          /\bphp\b/i.test(textLower) ||
+          /\bqa\b/i.test(textLower) ||
+          /\btester\b/i.test(textLower) ||
+          /\btesting\b/i.test(textLower) ||
+          /\bdevops\b/i.test(textLower);
+      }
+
+      if (isJavaOrPython) {
+        if (l.emailedSubject !== 'Skipped: Backend/QA/DevOps') {
+          console.log(`[LinkedIn Feed Scouter] 🛑 Failsafe skipped emailing lead ${l.email} due to Java/Python/PHP/QA/DevOps keywords.`);
+          l.emailedAt = new Date().toISOString();
+          l.emailedSubject = 'Skipped: Backend/QA/DevOps';
+          leadsUpdated = true;
+        }
+        return false;
+      }
+
+      // 3. Allow emailing if never emailed, OR reset and re-email if > 10 days ago (and passed reply check above)
+      // Note: We DO NOT wipe l.emailedAt here anymore to prevent database loss if script stops mid-run.
+      return true;
+    })
+    .sort((a: any, b: any) => {
+      // Kolkata leads first, then new leads from this run first, then old pending
+      const aKolkata = (a.isKolkataLead === true || /kolkata|calcutta|salt lake|sector v|rajarhat|new town|west bengal/i.test(a.location || '')) ? 0 : 1;
+      const bKolkata = (b.isKolkataLead === true || /kolkata|calcutta|salt lake|sector v|rajarhat|new town|west bengal/i.test(b.location || '')) ? 0 : 1;
+      if (aKolkata !== bKolkata) return aKolkata - bKolkata;
+
+      const aNew = newLeadsThisRunEmails && newLeadsThisRunEmails.has((a.email || '').toLowerCase()) ? 0 : 1;
+      const bNew = newLeadsThisRunEmails && newLeadsThisRunEmails.has((b.email || '').toLowerCase()) ? 0 : 1;
+      return aNew - bNew;
+    });
+
+  // If we marked any as skipped, save the file immediately
+  if (leadsUpdated) {
+    try {
+      fs.writeFileSync(leadsFilePath, JSON.stringify(leads, null, 2), 'utf-8');
+    } catch (saveErr: any) {
+      console.error(`[LinkedIn Feed Scouter] ⚠️ Failed to save leads file after failsafe skipping:`, saveErr.message);
+    }
+  }
   if (pendingLeads.length === 0) {
     console.log(`[LinkedIn Feed Scouter] No new pending leads found to email.`);
     return;
   }
 
-  console.log(`[LinkedIn Feed Scouter] Found ${pendingLeads.length} new lead(s) for automatic outreach.`);
+  const kolkataCount = pendingLeads.filter((l: any) => l.isKolkataLead || /kolkata|calcutta|salt lake|west bengal/i.test(l.location || '')).length;
+  console.log(`[LinkedIn Feed Scouter] Found ${pendingLeads.length} lead(s) for outreach — 📍 ${kolkataCount} Kolkata leads (emailed first).`);
 
   // 4. Create SMTP Transporter
   let transporter;
@@ -1974,7 +2732,7 @@ async function autoSendFeedOutreach() {
     return;
   }
 
-  const fromAddress = config.senderEmail 
+  const fromAddress = config.senderEmail
     ? `"${config.senderName}" <${config.senderEmail}>`
     : `"${config.senderName}" <${config.username}>`;
 
@@ -1995,13 +2753,13 @@ async function autoSendFeedOutreach() {
   for (const lead of pendingLeads) {
     try {
       const parsed = parseLeadPost(lead);
-      
+
       // Dynamic Subject Line
       const subject = parsed.roleTitle && parsed.company && parsed.company !== 'Hiring Manager'
         ? `Application for ${parsed.roleTitle} at ${parsed.company} - Shatadal Sundar Sinha`
         : parsed.roleTitle
-        ? `Senior Frontend Developer Opportunity - ${parsed.roleTitle} - Shatadal Sundar Sinha`
-        : `Senior Frontend Developer Opportunity - Shatadal Sundar Sinha`;
+          ? `Senior Frontend Developer Opportunity - ${parsed.roleTitle} - Shatadal Sundar Sinha`
+          : `Senior Frontend Developer Opportunity - Shatadal Sundar Sinha`;
 
       // Generate customized cover letter dynamically tailored by AI
       const coverLetter = await generateTailoredCoverLetter(lead.postText, parsed);
@@ -2009,7 +2767,7 @@ async function autoSendFeedOutreach() {
       const htmlContent = getGraphicOutreachTemplate(coverLetter);
 
       console.log(`[LinkedIn Feed Scouter] ✉️ Sending auto-email to: ${lead.email} | Subject: "${subject}"...`);
-      
+
       await transporter.sendMail({
         from: fromAddress,
         to: lead.email,
@@ -2025,7 +2783,16 @@ async function autoSendFeedOutreach() {
       lead.outreachError = undefined;
       sentCount++;
       processedCount++;
-      
+
+      // ✅ BUG FIX: Save immediately after each successful send.
+      // Previously only saved at the end — if the process was killed/stopped mid-run,
+      // all sent emails remained stuck in "pending" state in the DB forever.
+      try {
+        fs.writeFileSync(leadsFilePath, JSON.stringify(leads, null, 2), 'utf-8');
+      } catch (saveErr: any) {
+        console.error(`[LinkedIn Feed Scouter] ⚠️ Failed to save progress after emailing ${lead.email}:`, saveErr.message);
+      }
+
       // Safety delay to prevent spam flags
       await delay(2500);
     } catch (sendErr: any) {
@@ -2035,58 +2802,92 @@ async function autoSendFeedOutreach() {
       lead.emailedAt = undefined;
       lead.emailedSubject = undefined;
       processedCount++;
+
+      // ✅ BUG FIX: Save failure status immediately so it doesn't remain stuck as "pending"
+      try {
+        fs.writeFileSync(leadsFilePath, JSON.stringify(leads, null, 2), 'utf-8');
+      } catch (saveErr: any) {
+        console.error(`[LinkedIn Feed Scouter] ⚠️ Failed to save failure status for ${lead.email}:`, saveErr.message);
+      }
     }
   }
 
-  // Save progress back to feed_leads.json
+  // Final consistency save after the full loop
   if (processedCount > 0) {
     try {
       fs.writeFileSync(leadsFilePath, JSON.stringify(leads, null, 2), 'utf-8');
-      console.log(`[LinkedIn Feed Scouter] ✅ Auto-outreach pass complete. Sent: ${sentCount}, Failed: ${processedCount - sentCount}. Saved progress.`);
+      console.log(`[LinkedIn Feed Scouter] ✅ Auto-outreach pass complete. Sent: ${sentCount}, Failed: ${processedCount - sentCount}. Progress saved.`);
     } catch (saveErr: any) {
-      console.error(`[LinkedIn Feed Scouter] Failed to write updated leads file:`, saveErr.message);
+      console.error(`[LinkedIn Feed Scouter] Failed to write final leads file:`, saveErr.message);
     }
   }
 }
 
 function extractEmails(text: string): string[] {
   if (!text) return [];
-  
   const emails: string[] = [];
-  const standardRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  
-  // Normalize obfuscation and spacing:
-  // e.g. name [at] domain.com, name(at)domain.com, name at domain dot com, name @ domain . com
-  let cleanText = text
-    .replace(/\s*\[\s*at\s*\]\s*/gi, '@')
-    .replace(/\s*\(\s*at\s*\)\s*/gi, '@')
-    .replace(/\s*\{\s*at\s*\}\s*/gi, '@')
-    .replace(/\s*@\s*/g, '@')
-    .replace(/\s*\[\s*dot\s*\]\s*/gi, '.')
-    .replace(/\s*\(\s*dot\s*\)\s*/gi, '.')
-    .replace(/\s*\{\s*dot\s*\}\s*/gi, '.')
-    .replace(/\s*\.\s*/g, '.');
-  
-  cleanText = cleanText.replace(/\s+at\s+/gi, '@');
-  cleanText = cleanText.replace(/\s+dot\s+/gi, '.');
 
-  const matches = cleanText.match(standardRegex);
+  // Robust regex to find potential email matches (including obfuscated formats)
+  const emailRegex = /\b[a-zA-Z0-9._%+-]+\s*(?:@|\[at\]|\(at\)|\{at\}|\s+at\s+)\s*[a-zA-Z0-9.-]+\s*(?:\.|\[dot\]|\(dot\)|\{dot\}|\s+dot\s+)\s*[a-zA-Z]{2,15}\b/gi;
+
+  const matches = text.match(emailRegex);
   if (matches) {
-    matches.forEach(email => {
-      const normalized = email.trim().toLowerCase();
-      if (!emails.includes(normalized)) {
-        emails.push(normalized);
+    const commonTLDs = new Set([
+      'com', 'in', 'org', 'net', 'co', 'tech', 'ai', 'io', 'us', 'uk', 'ca', 'de', 'fr', 'jp',
+      'info', 'me', 'edu', 'gov', 'mil', 'work', 'careers', 'online', 'dev', 'app'
+    ]);
+
+    for (const match of matches) {
+      // Clean up spacing and obfuscations for this specific match only
+      let clean = match
+        .replace(/\s*\[\s*at\s*\]\s*/gi, '@')
+        .replace(/\s*\(\s*at\s*\)\s*/gi, '@')
+        .replace(/\s*\{\s*at\s*\}\s*/gi, '@')
+        .replace(/\s+at\s+/gi, '@')
+        .replace(/\s*@\s*/g, '@')
+        .replace(/\s*\[\s*dot\s*\]\s*/gi, '.')
+        .replace(/\s*\(\s*dot\s*\)\s*/gi, '.')
+        .replace(/\s*\{\s*dot\s*\}\s*/gi, '.')
+        .replace(/\s+dot\s+/gi, '.')
+        .replace(/\s*\.\s*/g, '.')
+        .trim();
+
+      // Reject any emails with consecutive dots or starting/ending dots (e.g. truncated ellipsis like quiet... @ odiin)
+      if (clean.includes('..') || clean.startsWith('.') || clean.endsWith('.')) {
+        continue;
       }
-    });
+
+      const parts = clean.split('@');
+      if (parts.length === 2) {
+        const domain = parts[1];
+        const domainParts = domain.split('.');
+        if (domainParts.length >= 2) {
+          const tld = domainParts[domainParts.length - 1].toLowerCase();
+
+          // Check if TLD is valid:
+          // Either it is in our common TLD list, OR it does NOT start with a capital letter in the original text
+          // (which would indicate a sentence boundary, e.g. "contact me @ John. We are...")
+          const originalTLDStart = match.slice(-tld.length)[0];
+          const isCapitalized = originalTLDStart && originalTLDStart === originalTLDStart.toUpperCase() && originalTLDStart !== originalTLDStart.toLowerCase();
+
+          if (commonTLDs.has(tld) || !isCapitalized) {
+            const finalEmail = clean.toLowerCase();
+            if (!emails.includes(finalEmail)) {
+              emails.push(finalEmail);
+            }
+          }
+        }
+      }
+    }
   }
-  
+
   return emails;
 }
 
 async function runLinkedInFeedScouter(page: any) {
   console.log('\n[LinkedIn Feed Scouter] Starting Home Feed scouting...');
   await updateAgentStatus(page, 'Navigating to LinkedIn Feed');
-  
+
   try {
     await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
   } catch (err: any) {
@@ -2138,141 +2939,380 @@ async function runLinkedInFeedScouter(page: any) {
   // Dismiss any blocking modals/popups right away (e.g. premium overlays)
   await dismissLinkedInPostApplyModal(page);
 
-  // Search queries to loop through dynamically
+  // 🌐 Location-free search queries targeting core frontend/React/Next.js roles to maximize lead volume globally.
   const searchQueries = [
     'hiring React js',
     'hiring Next js',
+    'hiring React developer',
+    'hiring Next.js developer',
     'hiring Frontend developer',
+    'hiring UI developer',
+    'hiring React Frontend developer',
+    'hiring Nextjs developer',
+    'hiring Senior React developer',
     'hiring Senior Frontend developer',
-    'hiring Full Stack Developer',
-    'hiring UI developer'
+    'hiring React Native developer',
+    'hiring NextJS developer',
+    'hiring Frontend engineer',
+    'hiring React engineer',
+    'hiring Next.js engineer',
+    'hiring UI engineer',
+    'hiring Senior UI developer',
+    'hiring Senior UI engineer',
+    'hiring Lead Frontend developer',
+    'hiring Lead React developer',
+    'hiring JavaScript developer',
+    'hiring TypeScript developer',
+    'hiring React JS developer',
+    'hiring Next JS developer',
+    'hiring Senior Frontend engineer',
+    'hiring Senior React engineer'
   ];
 
+  // ✅ datePosted="past-week" = Past Week | sortBy="date_posted" = newest posts FIRST (more data pool)
+  const DATE_FILTER = 'datePosted=%22past-week%22&sortBy=%22date_posted%22';
+
+  const stateFilePath = path.join(__dirname, 'data', 'scouter_state.json');
   let currentQueryIndex = 0;
+  if (fs.existsSync(stateFilePath)) {
+    try {
+      const stateContent = fs.readFileSync(stateFilePath, 'utf-8');
+      const state = JSON.parse(stateContent);
+      if (typeof state.currentQueryIndex === 'number') {
+        currentQueryIndex = state.currentQueryIndex % searchQueries.length;
+        console.log(`[LinkedIn Feed Scouter] 🔄 Loaded persisted query index: ${currentQueryIndex} ("${searchQueries[currentQueryIndex]}")`);
+      }
+    } catch (err: any) {
+      console.warn(`[LinkedIn Feed Scouter] Failed to read query state file:`, err.message);
+    }
+  }
+
   let lastQuerySwitchTime = 0;
-  // Change search terms every 90 seconds (1.5 minutes) to cover all of them within 10 minutes run
-  const QUERY_DURATION = 90 * 1000;
+  // Rotate query every 120 seconds (2 minutes) — faster rotation = more query variety = more unique posts
+  const QUERY_DURATION = 120 * 1000;
+
+  // Stalled feed detection variables
+  let forceQuerySwitch = false;
+  let lastDebugSaveTime = 0;
 
   // Track emails processed in this run to prevent duplicates
   const processedEmailsThisRun = new Set<string>();
+  // Track seen post text fingerprints to skip duplicate posts
+  const seenPostFingerprints = new Set<string>();
 
-  const duration = 10 * 60 * 1000; // 10 minutes in ms
+  // ✅ ACCURACY: Keyword sets defined ONCE outside the loop — not rebuilt every 150ms
+  const hiringKeywords = [
+    'hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy',
+    'apply to', 'send resume', 'send cv', 'immediate joiner', 'share resume', 'share cv',
+    'send your cv', 'send your resume', 'dm your cv', 'dm resume', 'dm me', 'hiring managers',
+    'hr team', 'hr manager', 'talent acquisition', 'job opportunity', 'open position',
+    'email me', 'reach out', 'write to', 'jobs', 'grow our team', 'team is growing', 'career opportunity',
+    'opportunity', 'opportunities', 'join us', 'work with us', 'roles', 'openings', 'recruiter', 'hr',
+    'urgent hiring', 'immediate requirement', 'urgent requirement', 'walk-in', 'walk in',
+    'drop your cv', 'share your profile', 'connect with us', 'apply now', 'we are looking'
+  ];
+
+  const techKeywords = [
+    'react', 'react.js', 'reactjs', 'next.js', 'nextjs', 'angular', 'angularjs', 'typescript',
+    'javascript', 'js', 'es6', 'es2015',
+    'frontend', 'front-end', 'front end', 'ui developer', 'ui engineer', 'web developer',
+    'software developer', 'software engineer', 'developer', 'engineer',
+    'senior developer', 'senior engineer', 'senior frontend', 'senior front-end',
+    'node', 'node.js', 'nodejs', 'express', 'express.js', 'ejs', 'rest api', 'restful',
+    'mongodb', 'mongoose', 'redux', 'context api', 'react query', 'zustand',
+    'html', 'html5', 'css', 'css3', 'sass', 'scss', 'tailwind', 'tailwindcss',
+    'bootstrap', 'material ui', 'mui', 'ant design', 'antd', 'styled components',
+    'full stack', 'fullstack', 'saas', 'edtech', 'proptech', 'crm', 'dashboard', 'admin panel',
+    'razorpay', 'cashfree', 'instamojo', 'payment gateway', 'payment integration',
+    'ai agent', 'chatbot', 'browser-automation', 'browser automation', 'playwright',
+    'autonomous agent', 'llm', 'generative ai', 'openai', 'groq', 'ai tools',
+    'web', 'responsive', 'figma', 'pixel perfect', 'performance optimisation'
+  ];
+
+  const jobSeekerKeywords = [
+    'open to work', 'opentowork', 'seeking a new role', 'looking for a job',
+    'looking for my next', 'my next opportunity', 'my next role', 'exploring my next',
+    'open to new opportunities', 'looking for a frontend role', 'looking for a developer role',
+    'looking for a software developer role', 'looking for a software engineer role',
+    'looking for a UI developer role', 'looking for a front-end role',
+    'seeking new opportunities', 'looking for new opportunities', 'looking for work',
+    'looking for a new challenge', 'seeking role', 'seeking opportunity', 'looking for opportunities',
+    'my next challenge', 'my next career move', 'my next adventure'
+  ];
+
+  // ✅ SPEED: Kolkata area terms compiled once
+  const KOLKATA_AREA_TERMS = [
+    'kolkata', 'calcutta', 'salt lake', 'sector v', 'sector-v', 'sector 5',
+    'rajarhat', 'new town', 'newtown', 'park street', 'em bypass', 'e.m. bypass',
+    'howrah', 'dum dum', 'dumdum', 'lake town', 'jadavpur', 'ballygunge',
+    'esplanade', 'bidhannagar', 'ultadanga', 'baguiati', 'kestopur',
+    'west bengal', 'wb'
+  ];
+
+  const baseDuration = process.env.FEED_SCOUTER_DURATION
+    ? parseInt(process.env.FEED_SCOUTER_DURATION) * 60 * 1000
+    : 25 * 60 * 1000; // Default to 25 minutes per run session
+  const MAX_EXTENSION_MS = 5 * 60 * 1000; // Auto-extend up to 5 extra minutes if target not met
+  let duration = baseDuration;
+  const TARGET_LEADS = parseInt(process.env.FEED_SCOUTER_TARGET_LEADS || '50');
+  let totalNewLeadsThisRun = 0;
   const startTime = Date.now();
   let loopCount = 0;
 
-  console.log(`[LinkedIn Feed Scouter] Will run continuous search-based scouting for 10 minutes.`);
+  // Track profile URLs processed in this run to prevent duplicate profile leads
+  const processedProfilesThisRun = new Set<string>();
+
+  console.log(`[LinkedIn Feed Scouter] ✅ Turbo scouter started — Dual-track (email+profile) + Fast scroll + Target: ${TARGET_LEADS} leads. Running ${Math.round(duration / 60000)} minutes.`);
 
   while (Date.now() - startTime < duration) {
     loopCount++;
     const minutesLeft = Math.ceil((duration - (Date.now() - startTime)) / 60000);
-    console.log(`[LinkedIn Feed Scouter] Loop #${loopCount} | Time remaining: ~${minutesLeft} minute(s)`);
+    console.log(`[LinkedIn Feed Scouter] Loop #${loopCount} | Time remaining: ~${minutesLeft}m | Leads DB: ${seenPostFingerprints.size} unique posts seen`);
 
     // URL & Search Query Switch Check
     const currentUrl = page.url();
-    const isSearchPage = currentUrl.includes('/search/results/content');
+    const isSearchPage = currentUrl.includes('/search/results');
     const timeSinceSwitch = Date.now() - lastQuerySwitchTime;
 
-    if (!isSearchPage || timeSinceSwitch >= QUERY_DURATION) {
-      const query = searchQueries[currentQueryIndex];
-      console.log(`[LinkedIn Feed Scouter] Navigating to search query: "${query}" (Loop #${loopCount}, Index: ${currentQueryIndex})...`);
-      await updateAgentStatus(page, `Searching: ${query}`);
-      
+    if (!isSearchPage || timeSinceSwitch >= QUERY_DURATION || forceQuerySwitch) {
+      const baseQuery = searchQueries[currentQueryIndex];
+      // Rotate through suffixes to find different post patterns containing emails
+      const suffixes = ['email', 'gmail.com', 'careers', 'send cv', 'share resume'];
+      const suffix = suffixes[currentQueryIndex % suffixes.length];
+      const query = `${baseQuery} ${suffix}`;
+      console.log(`[LinkedIn Feed Scouter] 🔍 Query ${currentQueryIndex + 1}/${searchQueries.length}: "${query}"`);
+      await updateAgentStatus(page, `Scouting: ${baseQuery.substring(0, 30)}...`);
+
+      // Reset progress flags on query switch
+      forceQuerySwitch = false;
+
       try {
-        const searchUrl = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(query)}`;
+        const searchUrl = `https://www.linkedin.com/search/results/content/?${DATE_FILTER}&keywords=${encodeURIComponent(query)}`;
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+
+        // Wait for results list to render on the page
+        const resultsSelector = '.reusable-search__entity-result-list, .reusable-search__result-container, .feed-shared-update-v2, [data-chameleon-result-urn], .search-results-container, [data-testid="expandable-text-box"], [componentkey*="feed-commentary"]';
+        await page.waitForSelector(resultsSelector, { state: 'attached', timeout: 5000 }).catch(() => {
+          console.log('[LinkedIn Feed Scouter] ⚠️ Timeout waiting for search results list to load.');
+        });
+        await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => { });
+
         lastQuerySwitchTime = Date.now();
         currentQueryIndex = (currentQueryIndex + 1) % searchQueries.length;
+        seenPostFingerprints.clear();
+        try {
+          fs.writeFileSync(stateFilePath, JSON.stringify({ currentQueryIndex }, null, 2), 'utf-8');
+        } catch (saveErr: any) {
+          console.warn(`[LinkedIn Feed Scouter] Failed to save query state file:`, saveErr.message);
+        }
       } catch (err: any) {
-        console.warn(`[LinkedIn Feed Scouter] Warning during search navigation: ${err.message}`);
+        console.warn(`[LinkedIn Feed Scouter] Navigation warning: ${err.message}`);
       }
-      // Give page some extra time to load search results
-      await randomDelay(3000, 5000);
+      await randomDelay(1500, 2000);
       continue;
     }
 
-    await updateAgentStatus(page, `Scouting posts (~${minutesLeft}m left)`);
+    await updateAgentStatus(page, `Scouting (~${minutesLeft}m left)`);
 
-    // 1. Scroll down a bit to trigger loading more posts
-    console.log('[LinkedIn Feed Scouter] Scrolling search results to load more posts...');
-    for (let s = 0; s < 2; s++) {
-      await dismissLinkedInPostApplyModal(page);
-      await humanScroll(page, 1200);
-      await page.waitForTimeout(200);
-    }
-
-    // 2. Dismiss popup modals
+    // ─── STEP 1: Modal dismiss ──────────────────────────────────────────────────
     await dismissLinkedInPostApplyModal(page);
 
-    // 3. Find and click all visible "...see more" buttons in parallel ONLY inside feed post containers to prevent widget redirects
-    console.log('[LinkedIn Feed Scouter] Finding and expanding all "see more" buttons in parallel inside updates...');
+    // ─── STEP 2: Quick scroll down to load all posts on the current page ────────
+    console.log('[LinkedIn Feed Scouter] ⚡ Smooth fast-scrolling to load all posts on the page...');
+    try {
+      // 1. Center the mouse over the viewport
+      const viewport = page.viewportSize();
+      if (viewport) {
+        await page.mouse.move(viewport.width / 2, viewport.height / 2).catch(() => { });
+      }
+
+      // 2. Focus body to receive scroll events
+      await page.locator('body').first().focus().catch(() => { });
+
+      // Unlock layout scroll properties to bypass any modal/hidden overflow locks
+      await page.evaluate(`
+        (function() {
+          var unlock = function(el) {
+            if (!el) return;
+            el.style.setProperty('overflow', 'auto', 'important');
+            el.style.setProperty('overflow-y', 'auto', 'important');
+            el.style.setProperty('position', 'static', 'important');
+            el.style.setProperty('height', 'auto', 'important');
+          };
+          unlock(document.body);
+          unlock(document.documentElement);
+          unlock(document.querySelector('.scaffold-layout'));
+          unlock(document.querySelector('.scaffold-layout__inner'));
+        })()
+      `);
+
+      // Quick scroll sequence using multiple channels (Optimized for faster infinite scrolling)
+      for (let s = 0; s < 15; s++) {
+        await page.evaluate(`
+          (function() {
+            window.scrollBy(0, 2000);
+            if (document.scrollingElement) {
+              document.scrollingElement.scrollTop += 2000;
+            }
+
+            var containers = [
+              '.scaffold-layout__list',
+              '.jobs-search-results-list',
+              '.search-results-container',
+              'ul.reusable-search__entity-result-list',
+              '[data-testid="search-results-list"]'
+            ];
+            for (var i = 0; i < containers.length; i++) {
+              var el = document.querySelector(containers[i]);
+              if (el) {
+                el.scrollBy(0, 1500);
+                el.scrollTop += 1500;
+              }
+            }
+
+            var posts = Array.from(document.querySelectorAll('[data-testid="expandable-text-box"], [componentkey*="feed-commentary"], .update-components-text'));
+            if (posts.length > 0) {
+              var lastPost = posts[posts.length - 1];
+              if (lastPost && lastPost.scrollIntoView) {
+                lastPost.scrollIntoView({ block: 'end', behavior: 'smooth' });
+              }
+            }
+          })()
+        `).catch(function() { });
+
+        // D. Native keyboard and mouse wheel fallbacks
+        await page.keyboard.press('PageDown').catch(() => { });
+        await page.mouse.wheel(0, 1500).catch(() => { });
+
+        await page.waitForTimeout(100); // 100ms delay to let browser render
+      }
+    } catch (scrollErr: any) {
+      console.warn(`[LinkedIn Feed Scouter] Scroll logic failed:`, scrollErr.message);
+    }
+
+    // ─── STEP 3: Expand ALL "see more" buttons ─────────────────────────────────
     const expandedCount = await page.evaluate(() => {
-      const seeMoreButtons = Array.from(document.querySelectorAll('[data-testid="expandable-text-button"], button[class*="see-more" i], span[class*="see-more" i], button[class*="show-more" i]'));
+      const sel = [
+        '[data-testid="expandable-text-button"]',
+        'button[class*="see-more" i]',
+        'span[class*="see-more" i]',
+        'button[class*="show-more" i]',
+        'button[aria-label*="see more" i]',
+        'button[aria-label*="show more" i]',
+        '.feed-shared-inline-show-more-text__see-more-less-toggle',
+        '.update-components-text__see-more',
+        'button[class*="_"]'
+      ].join(',');
+      const buttons = Array.from(document.querySelectorAll(sel));
       let count = 0;
-      seeMoreButtons.forEach((el: any) => {
-        const rect = el.getBoundingClientRect();
-        const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none' && window.getComputedStyle(el).visibility !== 'hidden';
-        if (isVisible) {
-          try {
-            el.click();
-            count++;
-          } catch (e) {}
+      buttons.forEach((el: any) => {
+        const btnText = (el.innerText || el.textContent || '').trim().toLowerCase();
+        if (!btnText.includes('more') && !btnText.includes('see') && !btnText.includes('show')) return;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 &&
+          window.getComputedStyle(el).display !== 'none' &&
+          window.getComputedStyle(el).visibility !== 'hidden') {
+          try { el.click(); count++; } catch { }
         }
       });
       return count;
     }).catch(() => 0);
-    console.log(`[LinkedIn Feed Scouter] Expanded ${expandedCount} see-more buttons in parallel.`);
-    await page.waitForTimeout(300); // single shorter wait for parallel layout update
 
+    try {
+      const seeMoreBtns = page.locator('button:has-text("more"), button:has-text("See more")');
+      const seeMoreCount = await seeMoreBtns.count();
+      for (let i = 0; i < Math.min(seeMoreCount, 20); i++) {
+        await seeMoreBtns.nth(i).click({ force: true }).catch(() => { });
+      }
+    } catch { }
+
+    if (expandedCount > 0) {
+      console.log(`[LinkedIn Feed Scouter] ✅ Expanded ${expandedCount} see-more buttons.`);
+      await page.waitForTimeout(300);
+    }
+
+    // ─── STEP 4: Extract posts ─────────────────────────────────────────────────
     const postsData = await page.evaluate(() => {
       const data: any[] = [];
-      const textContainers = Array.from(document.querySelectorAll('[data-testid="expandable-text-box"], .feed-shared-update-v2__description, .update-components-text, div[class*="feed-shared-inline-show-more-text"], .feed-shared-text-view'));
-      
-      textContainers.forEach((textEl: any, index) => {
-        const postText = textEl.innerText || '';
-        if (!postText.trim()) return;
-        
-        // Find the wrapping card container by traversing up the DOM
-        const card = textEl.closest('li, [role="listitem"], article, .feed-shared-update-v2, [data-activity-urn], [data-urn]') || textEl.parentElement;
-        if (!card) return;
-        
-        const authorLink = card.querySelector('a[href*="/in/"], a[href*="/company/"]');
-        let authorProfile = '';
-        let authorName = '';
-        
-        if (authorLink) {
-          authorProfile = authorLink.getAttribute('href') || '';
-          const img = authorLink.querySelector('img');
-          const imgAlt = img ? img.getAttribute('alt') : '';
-          if (imgAlt && imgAlt.includes('profile')) {
-            authorName = imgAlt.replace(/View\s+/i, '').replace(/’s\s+profile/i, '').replace(/'s\s+profile/i, '').trim();
+      const seenCards = new Set<string>();
+
+      const selectors = [
+        '[data-testid="expandable-text-box"]',
+        '[componentkey*="feed-commentary"]',
+        '.update-components-text',
+        '.feed-shared-update-v2__commentary',
+        '.feed-shared-update-v2__description'
+      ];
+
+      const textElements: HTMLElement[] = [];
+      const seenTextElements = new Set<Element>();
+
+      selectors.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => {
+          if (!seenTextElements.has(el)) {
+            seenTextElements.add(el);
+            textElements.push(el as HTMLElement);
           }
-          
-          if (!authorName) {
-            authorName = (authorLink as any).innerText.split('\n')[0].trim();
-          }
-        }
-        
-        let authorHeadline = '';
-        const headerTexts = Array.from(card.querySelectorAll('p, span'))
-          .map(e => ((e as any).innerText || '').trim())
-          .filter(t => t.length > 0);
-        
-        const nameIndex = headerTexts.indexOf(authorName);
-        if (nameIndex !== -1 && headerTexts[nameIndex + 1]) {
-          const candidateHeadline = headerTexts[nameIndex + 1];
-          if (candidateHeadline.length > 5 && !postText.includes(candidateHeadline)) {
-            authorHeadline = candidateHeadline;
-          }
-        }
-        
-        data.push({
-          authorName: authorName || `Recruiter #${index + 1}`,
-          authorProfile: authorProfile,
-          authorHeadline: authorHeadline,
-          postText: postText
         });
       });
-      
+
+      textElements.forEach(textEl => {
+        const postText = (textEl.innerText || textEl.textContent || '').trim();
+        if (postText.length < 30) return;
+
+        let card: any = textEl.parentElement;
+        let authorProfile = '';
+        let authorName = '';
+
+        for (let i = 0; i < 20; i++) {
+          if (!card) break;
+          const profileLinks = Array.from(card.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) as any[];
+          if (profileLinks.length > 0) {
+            const pl = profileLinks[0];
+            authorProfile = pl.getAttribute('href') || '';
+            const img = pl.querySelector('img');
+            const alt = (img?.getAttribute('alt') || '').trim();
+            if (alt && alt.length > 2) {
+              authorName = alt.replace(/view\s+/i, '').replace(/'s\s+profile/i, '').trim();
+            }
+            if (!authorName) {
+              authorName = (pl.innerText || '').split('\n')[0].trim();
+            }
+            break;
+          }
+          card = card.parentElement;
+        }
+
+        if (!card) card = textEl.parentElement;
+
+        if (authorProfile && !authorProfile.startsWith('http')) {
+          authorProfile = 'https://www.linkedin.com' + authorProfile;
+        }
+
+        const fingerprint = `${authorProfile || ''}::${postText.substring(0, 100)}`;
+        if (seenCards.has(fingerprint)) return;
+        seenCards.add(fingerprint);
+
+        let authorHeadline = '';
+        if (card && authorName) {
+          const lines = (card.innerText || '').split('\n').map((t: string) => t.trim()).filter((t: string) => t.length > 3);
+          const nameIdx = lines.findIndex((t: string) => t === authorName);
+          if (nameIdx !== -1 && lines[nameIdx + 1]) {
+            const c = lines[nameIdx + 1];
+            if (!c.includes('Follow') && !c.includes('•') && c.length > 5) {
+              authorHeadline = c;
+            }
+          }
+        }
+
+        data.push({
+          authorName: authorName || 'Recruiter',
+          authorProfile: authorProfile || '',
+          authorHeadline: authorHeadline || '',
+          postText
+        });
+      });
+
       return data;
     }).catch((err: any) => {
       console.error(`[LinkedIn Feed Scouter] Evaluate failed:`, err.message);
@@ -2280,195 +3320,344 @@ async function runLinkedInFeedScouter(page: any) {
     });
 
     const postCount = postsData.length;
-    console.log(`[LinkedIn Feed Scouter] Found and parsed ${postCount} post containers in current view.`);
+    console.log(`[LinkedIn Feed Scouter] 📋 Extracted ${postCount} post containers from current page.`);
 
-    if (postCount === 0) {
-      console.log(`[LinkedIn Feed Scouter] [Debug] Found 0 posts. Capturing page state...`);
+    if (postCount === 0 && (Date.now() - lastDebugSaveTime > 60000)) {
+      lastDebugSaveTime = Date.now();
+      console.log(`[LinkedIn Feed Scouter] ⚠️ 0 posts extracted. Saving debug snapshot...`);
       try {
         const debugHtml = await page.content();
         fs.writeFileSync('c:\\MyPerosnalAgent\\my-personal-agent\\scratch\\scouter_debug.html', debugHtml, 'utf-8');
         await page.screenshot({ path: 'c:\\MyPerosnalAgent\\my-personal-agent\\scratch\\scouter_debug.png' });
-        console.log(`[LinkedIn Feed Scouter] [Debug] Saved page screenshot to scratch/scouter_debug.png and HTML to scratch/scouter_debug.html`);
+        console.log(`[LinkedIn Feed Scouter] Debug snapshot saved.`);
       } catch (err: any) {
-        console.warn(`[LinkedIn Feed Scouter] [Debug] Failed to capture debug state: ${err.message}`);
+        console.warn(`[LinkedIn Feed Scouter] Debug snapshot failed: ${err.message}`);
       }
     }
 
-    const hiringKeywords = [
-      'hiring', 'recruiting', 'looking for', 'job opening', 'career', 'join our team', 'vacancy', 
-      'apply to', 'send resume', 'send cv', 'immediate joiner', 'share resume', 'share cv', 
-      'send your cv', 'send your resume', 'dm your cv', 'dm resume', 'dm me', 'hiring managers',
-      'hr team', 'hr manager', 'talent acquisition', 'job opportunity', 'open position',
-      'email me', 'reach out', 'write to', 'jobs', 'grow our team', 'team is growing', 'career opportunity',
-      'opportunity', 'opportunities', 'join us', 'work with us', 'roles', 'openings', 'recruiter', 'hr',
-      'urgent hiring', 'immediate requirement', 'urgent requirement', 'walk-in', 'walk in',
-      'drop your cv', 'share your profile', 'connect with us', 'apply now', 'we are looking'
-    ];
-    
-    const techKeywords = [
-      // Core Front-End frameworks (Shatadal's primary stack)
-      'react', 'react.js', 'reactjs', 'next.js', 'nextjs', 'angular', 'angularjs', 'typescript',
-      'javascript', 'js', 'es6', 'es2015',
-      // Role titles
-      'frontend', 'front-end', 'front end', 'ui developer', 'ui engineer', 'web developer',
-      'software developer', 'software engineer', 'developer', 'engineer',
-      'senior developer', 'senior engineer', 'senior frontend', 'senior front-end',
-      // Back-end & APIs (Shatadal has hands-on experience)
-      'node', 'node.js', 'nodejs', 'express', 'express.js', 'ejs', 'rest api', 'restful',
-      // Databases & state
-      'mongodb', 'mongoose', 'redux', 'context api', 'react query', 'zustand',
-      // Markup & styling
-      'html', 'html5', 'css', 'css3', 'sass', 'scss', 'tailwind', 'tailwindcss',
-      'bootstrap', 'material ui', 'mui', 'ant design', 'antd', 'styled components',
-      // Full stack & SaaS domains
-      'full stack', 'fullstack', 'saas', 'edtech', 'proptech', 'crm', 'dashboard', 'admin panel',
-      // Payment gateways (Shatadal integrated all three)
-      'razorpay', 'cashfree', 'instamojo', 'payment gateway', 'payment integration',
-      // AI Agents & automation (Shatadal's growing specialisation)
-      'ai agent', 'chatbot', 'browser-automation', 'browser automation', 'playwright',
-      'autonomous agent', 'llm', 'generative ai', 'openai', 'groq', 'ai tools',
-      // General web
-      'web', 'responsive', 'figma', 'pixel perfect', 'performance optimisation'
-    ];
+    // ─── STEP 5: Evaluate each post ─────────────────────────────────────────────
+    interface CandidatePost {
+      post: any;
+      postText: string;
+      postTextLower: string;
+      emailsMatched: string[];
+      hasEmails: boolean;
+      isKolkataLead: boolean;
+      isAbroadLead: boolean;
+      location: string;
+      jobType: string;
+      companyName: string;
+      profileUrl: string;
+      parsedInfo: any;
+    }
 
-    // Evaluate each post
+    const candidatePosts: CandidatePost[] = [];
+    let newLeadsThisLoop = 0;
+
     for (let i = 0; i < postCount; i++) {
       try {
         const post = postsData[i];
         const postText = post.postText;
-        if (!postText) {
-          continue;
-        }
+        if (!postText) continue;
 
-        const authorName = post.authorName;
-        console.log(`[LinkedIn Feed Scouter] Evaluating post #${i + 1}/${postCount} by "${authorName}"...`);
+        const postFingerprint = postText.trim().substring(0, 200).replace(/\s+/g, ' ');
+        if (seenPostFingerprints.has(postFingerprint)) continue;
+        seenPostFingerprints.add(postFingerprint);
 
         const postTextLower = postText.toLowerCase();
-        
-        // Check if it is a job seeker's post instead of a recruiter's post
-        const jobSeekerKeywords = [
-          'open to work', 'opentowork', 'seeking a new role', 'looking for a job',
-          'looking for my next', 'my next opportunity', 'my next role', 'exploring my next',
-          'open to new opportunities', 'looking for a frontend role', 'looking for a developer role',
-          'looking for a software developer role', 'looking for a software engineer role',
-          'looking for a UI developer role', 'looking for a front-end role',
-          'seeking new opportunities', 'looking for new opportunities', 'looking for work',
-          'looking for a new challenge', 'seeking role', 'seeking opportunity', 'looking for opportunities',
-          'my next challenge', 'my next career move', 'my next adventure'
-        ];
+        const emailsMatched = extractEmails(postText);
+        const hasEmails = emailsMatched && emailsMatched.length > 0;
+        const hasProfileUrl = !!(post.authorProfile && post.authorProfile.includes('/in/'));
 
-        const hasJobSeekerPhrase = jobSeekerKeywords.some(keyword => postTextLower.includes(keyword));
+        // Must have EITHER emails or a valid profile URL to be a useful lead
+        if (!hasEmails && !hasProfileUrl) continue;
+
+        const isWebskitters = postTextLower.includes('webskitters') ||
+          (hasEmails && emailsMatched.some(email => email.toLowerCase().includes('webskitters'))) ||
+          (post.authorName || '').toLowerCase().includes('webskitters');
+
+        if (isWebskitters) {
+          console.log(`[LinkedIn Feed Scouter] 🛑 Blocked/skipped Webskitters post: "${post.authorName}"`);
+          continue;
+        }
+
         const authorHeadlineLower = (post.authorHeadline || '').toLowerCase();
-        const isJobSeeker = hasJobSeekerPhrase || 
-                            authorHeadlineLower.includes('open to work') || 
-                            authorHeadlineLower.includes('opentowork') ||
-                            authorHeadlineLower.includes('seeking new opportunities') ||
-                            (postTextLower.includes('actively looking') && (postTextLower.includes('my next') || postTextLower.includes('new role') || postTextLower.includes('opportunity') || postTextLower.includes('opportunities') || postTextLower.includes('join') || postTextLower.includes('position'))) ||
-                            (postTextLower.includes('immediate joiner') && (postTextLower.includes('my profile') || postTextLower.includes('my cv') || postTextLower.includes('my resume') || postTextLower.includes('looking for a job') || postTextLower.includes('seeking')));
+        const isJobSeeker = jobSeekerKeywords.some(k => postTextLower.includes(k)) ||
+          authorHeadlineLower.includes('open to work') ||
+          authorHeadlineLower.includes('opentowork') ||
+          authorHeadlineLower.includes('seeking new opportunities') ||
+          (postTextLower.includes('actively looking') && (postTextLower.includes('my next') || postTextLower.includes('new role') || postTextLower.includes('opportunity'))) ||
+          (postTextLower.includes('immediate joiner') && (postTextLower.includes('my profile') || postTextLower.includes('my cv') || postTextLower.includes('my resume') || postTextLower.includes('seeking')));
 
         if (isJobSeeker) {
-          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" matches job-seeker signature. Skipping.`);
+          console.log(`[LinkedIn Feed Scouter] ↩ Job-seeker post skipped: "${post.authorName}"`);
           continue;
         }
 
-        // Extract emails (including standard and obfuscated ones)
-        const emailsMatched = extractEmails(postText);
-        if (!emailsMatched || emailsMatched.length === 0) {
-          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" has no email addresses. Skipping.`);
+        const isInternship =
+          postTextLower.includes('internship') ||
+          postTextLower.includes('intern ') ||
+          postTextLower.includes(' intern\n') ||
+          postTextLower.includes('interns ') ||
+          postTextLower.includes('unpaid intern') ||
+          postTextLower.includes('paid intern') ||
+          postTextLower.includes('summer intern') ||
+          postTextLower.includes('winter intern') ||
+          postTextLower.includes('trainee') ||
+          postTextLower.includes('trainees') ||
+          postTextLower.includes('apprentice') ||
+          postTextLower.includes('stipend') ||
+          /\bhiring\s+intern/i.test(postTextLower) ||
+          /\bintern\s+(?:position|role|opportunity|opening|program)/i.test(postTextLower);
+
+        if (isInternship) {
+          console.log(`[LinkedIn Feed Scouter] ↩ Internship post blocked: "${post.authorName}"`);
           continue;
         }
 
-        console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" contains email(s): ${emailsMatched.join(', ')}. Checking keywords...`);
+        const isHiring = hiringKeywords.some(k => postTextLower.includes(k)) ||
+          (hasEmails && emailsMatched.some(e => /hr|career|job|hire|recruit|talent/i.test(e)));
+        const matchesTech = techKeywords.some(k => postTextLower.includes(k));
 
-        const matchedHiring = hiringKeywords.filter(keyword => postTextLower.includes(keyword));
-        const matchedTech = techKeywords.filter(keyword => postTextLower.includes(keyword));
+        const isFrontendLeaning = [
+          'react', 'react.js', 'reactjs', 'next.js', 'nextjs',
+          'frontend', 'front-end', 'front end',
+          'ui developer', 'ui engineer', 'javascript', 'typescript', 'js'
+        ].some(k => postTextLower.includes(k));
 
-        const isHiring = matchedHiring.length > 0 || emailsMatched.some(e => e.includes('hr') || e.includes('career') || e.includes('job') || e.includes('hire') || e.includes('recruit') || e.includes('talent'));
-        const matchesTech = matchedTech.length > 0;
-
-        if (isHiring && matchesTech) {
-          console.log(`[LinkedIn Feed Scouter] ✅ Post #${i + 1} matched! (Hiring: ${matchedHiring.join(', ')} | Tech: ${matchedTech.join(', ')})`);
-          
-          let companyName = '';
-          const compMatch = post.authorHeadline.match(/at\s+([A-Za-z0-9\s]+)/i) || postText.match(/company:\s*([a-zA-Z0-9\s]+)/i);
-          if (compMatch) {
-            companyName = compMatch[1].trim();
-          } else {
-            companyName = post.authorHeadline.split('at')[1]?.trim() || '';
-          }
-
-          let jobType = 'Full-time';
-          if (postTextLower.includes('remote')) jobType = 'Remote';
-          else if (postTextLower.includes('hybrid')) jobType = 'Hybrid';
-          else if (postTextLower.includes('contract') || postTextLower.includes('freelance')) jobType = 'Contract';
-
-          let location = 'India';
-          const locMatch = postText.match(/location:\s*([a-zA-Z\s,]+)/i) || postText.match(/based in\s*([a-zA-Z\s,]+)/i);
-          if (locMatch) {
-            location = locMatch[1].trim();
-          }
-
-          let profileUrl = post.authorProfile;
-          if (profileUrl && !profileUrl.startsWith('http')) {
-            profileUrl = 'https://www.linkedin.com' + profileUrl;
-          }
-
-          // Parse lead information for AI background verification
-          const tempLeadForMatch = {
-            postText: postText,
-            companyName: companyName,
-            email: emailsMatched[0] || '',
-            authorName: authorName
-          };
-          const parsedInfo = parseLeadPost(tempLeadForMatch);
-
-          // Verify role alignment with Shatadal's background
-          const isBackgroundMatch = await checkJobMatchWithAI(postText, parsedInfo);
-          if (!isBackgroundMatch) {
-            console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" skipped (does NOT align with Senior Frontend Developer background).`);
+        // ✅ DUAL-TRACK KEYWORD GATES:
+        // Track A (email leads): isHiring && matchesTech (AI will validate frontend match)
+        // Track B (profile leads): (isHiring || matchesTech) && isFrontendLeaning (must be frontend-related)
+        if (hasEmails) {
+          if (!isHiring || !matchesTech) {
+            console.log(`[LinkedIn Feed Scouter] ↩ Email lead keyword mismatch (Hiring:${isHiring} Tech:${matchesTech}) — "${post.authorName}"`);
             continue;
           }
-
-          for (const email of emailsMatched) {
-            const emailClean = email.trim().toLowerCase();
-            if (processedEmailsThisRun.has(emailClean)) {
-              console.log(`[LinkedIn Feed Scouter] Memory check: Duplicate lead ignored in this run: ${emailClean}`);
-              continue;
-            }
-            processedEmailsThisRun.add(emailClean);
-
-            const lead: FeedLead = {
-              email: emailClean,
-              postText: postText.substring(0, 1000),
-              authorName: authorName || 'Recruiter',
-              authorProfile: profileUrl || '',
-              companyName: companyName || post.authorHeadline || 'Hiring Manager',
-              location: location,
-              jobType: jobType,
-              extractedAt: new Date().toISOString(),
-              postTime: 'Recent'
-            };
-
-            saveFeedLead(lead);
-          }
         } else {
-          console.log(`[LinkedIn Feed Scouter] Post #${i + 1} by "${authorName}" does not match criteria. (Hiring: ${isHiring ? 'Yes' : 'No'} | Tech: ${matchesTech ? 'Yes' : 'No'}). Skipping.`);
+          // Profile lead — looser entry but MUST be frontend
+          if (!(isHiring || matchesTech) || !isFrontendLeaning) {
+            console.log(`[LinkedIn Feed Scouter] ↩ Profile lead keyword mismatch (Hiring:${isHiring} Tech:${matchesTech} Frontend:${isFrontendLeaning}) — "${post.authorName}"`);
+            continue;
+          }
         }
-      } catch (e: any) {
+
+        let companyName = '';
+        const compMatch = (post.authorHeadline || '').match(/at\s+([A-Za-z0-9\s&.,'"-]+?)(?:\s*[|•·\-]|$)/i) ||
+          postText.match(/company[:\s]+([a-zA-Z0-9\s&.,'"-]{2,50})/i);
+        if (compMatch) companyName = compMatch[1].trim();
+        if (!companyName) companyName = (post.authorHeadline || '').split(/\s+at\s+/i)[1]?.split(/[|•·]/)[0]?.trim() || '';
+
+        let jobType = 'Full-time';
+        if (postTextLower.includes('remote')) jobType = 'Remote';
+        else if (postTextLower.includes('hybrid')) jobType = 'Hybrid';
+        else if (postTextLower.includes('contract') || postTextLower.includes('freelance')) jobType = 'Contract';
+
+        const isKolkataLead = KOLKATA_AREA_TERMS.some(t => postTextLower.includes(t)) ||
+          KOLKATA_AREA_TERMS.some(t => (post.authorHeadline || '').toLowerCase().includes(t));
+
+        let location = 'India';
+        const locLabelMatch = postText.match(/location[:\s]+([a-zA-Z\s,]{3,50})/i) ||
+          postText.match(/based in\s+([a-zA-Z\s,]{3,50})/i);
+        if (locLabelMatch) {
+          location = locLabelMatch[1].trim();
+        } else if (isKolkataLead) {
+          location = 'Kolkata, West Bengal';
+        } else {
+          const cityMatch = postTextLower.match(/\b(bangalore|bengaluru|mumbai|pune|hyderabad|delhi|gurgaon|noida|chennai|kolkata|calcutta)\b/);
+          if (cityMatch) location = cityMatch[1].charAt(0).toUpperCase() + cityMatch[1].slice(1);
+        }
+
+        let isAbroadLead = false;
+        const locationLower = location.toLowerCase();
+        const abroadKeywords = [
+          'usa', 'united states', 'uk', 'united kingdom', 'london', 'europe', 'germany', 'canada', 'singapore',
+          'australia', 'dubai', 'uae', 'emirates', 'gulf', 'middle east', 'netherlands', 'amsterdam', 'paris',
+          'france', 'berlin', 'tokyo', 'japan', 'switzerland', 'sweden', 'poland', 'ireland', 'dublin'
+        ];
+        const indianKeywords = [
+          'india', 'bangalore', 'bengaluru', 'mumbai', 'pune', 'hyderabad', 'delhi', 'gurgaon', 'gurugram', 'noida',
+          'chennai', 'kolkata', 'calcutta', 'west bengal', 'bengal', 'karnataka', 'maharashtra', 'telangana',
+          'tamil nadu', 'haryana', 'ncr'
+        ];
+        const hasAbroadIndicator = [
+          'remote us', 'remote uk', 'remote europe', 'global remote', 'worldwide remote', 'remote global', 'remote worldwide',
+          'remote (us)', 'remote (uk)', 'remote (europe)', 'work from anywhere', 'us remote', 'uk remote', 'europe remote',
+          'remote from anywhere', 'anywhere remote', 'hiring remotely worldwide'
+        ].some(k => postTextLower.includes(k));
+
+        const hasIndiaText = indianKeywords.some(k => postTextLower.includes(k));
+        const hasAbroadText = abroadKeywords.some(keyword => postTextLower.includes(keyword));
+
+        if (abroadKeywords.some(keyword => locationLower.includes(keyword))) {
+          isAbroadLead = true;
+        } else if (hasAbroadIndicator && !hasIndiaText) {
+          isAbroadLead = true;
+          if (location === 'India') location = 'Global Remote';
+        } else if (hasAbroadText && !hasIndiaText) {
+          isAbroadLead = true;
+          if (location === 'India') {
+            const matchedAbroad = abroadKeywords.find(keyword => postTextLower.includes(keyword));
+            if (matchedAbroad) {
+              location = matchedAbroad.charAt(0).toUpperCase() + matchedAbroad.slice(1);
+            }
+          }
+        }
+
+        let profileUrl = post.authorProfile;
+        if (profileUrl && !profileUrl.startsWith('http')) profileUrl = 'https://www.linkedin.com' + profileUrl;
+
+        const tempLeadForMatch = { postText, companyName, email: (hasEmails ? emailsMatched[0] : '') || '', authorName: post.authorName, isAbroadLead };
+        const parsedInfo = parseLeadPost(tempLeadForMatch);
+
+        if (isAbroadLead && jobType !== 'Remote') {
+          console.log(`[LinkedIn Feed Scouter] ↩ Skipped abroad lead "${post.authorName}" because it is not remote (Job Type: ${jobType})`);
+          continue;
+        }
+
+        const leadLabel = hasEmails ? `📧 emails: ${emailsMatched.join(', ')}` : `👤 profile: ${profileUrl || post.authorProfile}`;
+        console.log(`[LinkedIn Feed Scouter] ${hasEmails ? '📧' : '👤'} Candidate: "${post.authorName}" | ${leadLabel}${isKolkataLead ? ' 📍 KOLKATA' : ''}${isAbroadLead ? ' ✈️ ABROAD' : ''}`);
+        candidatePosts.push({ post, postText, postTextLower, emailsMatched, hasEmails, isKolkataLead, isAbroadLead, location, jobType, companyName, profileUrl, parsedInfo });
+      } catch {
         // Suppress individual card errors
       }
     }
 
-    // Brief delay between scroll loops
-    await randomDelay(1000, 2000);
+    if (candidatePosts.length > 0) {
+      // Split candidates into email leads (Track A — need AI check) and profile leads (Track B — skip AI)
+      const emailCandidates = candidatePosts.filter(c => c.hasEmails);
+      const profileCandidates = candidatePosts.filter(c => !c.hasEmails);
+
+      // ─── Track A: Email leads with AI verification ─────────────────────────────
+      if (emailCandidates.length > 0) {
+        console.log(`[LinkedIn Feed Scouter] 🤖 Running ${emailCandidates.length} AI checks for email leads...`);
+        const aiResults = await Promise.all(
+          emailCandidates.map(c => checkJobMatchWithAI(c.postText, c.parsedInfo).catch(() => true))
+        );
+
+        for (let i = 0; i < emailCandidates.length; i++) {
+          const c = emailCandidates[i];
+          const isMatch = aiResults[i];
+
+          if (!isMatch) {
+            console.log(`[LinkedIn Feed Scouter] 🤖 AI rejected: "${c.post.authorName}"`);
+            continue;
+          }
+
+          for (const email of c.emailsMatched) {
+            const emailClean = email.trim().toLowerCase();
+            if (processedEmailsThisRun.has(emailClean)) continue;
+
+            const lead: FeedLead = {
+              email: emailClean,
+              postText: c.postText.substring(0, 1200),
+              authorName: c.post.authorName || 'Recruiter',
+              authorProfile: c.profileUrl || '',
+              companyName: c.companyName || c.post.authorHeadline || 'Hiring Manager',
+              location: c.location,
+              jobType: c.jobType,
+              extractedAt: new Date().toISOString(),
+              postTime: 'Recent',
+              leadType: 'email',
+              ...(c.isKolkataLead ? { isKolkataLead: true } : {}),
+              ...(c.isAbroadLead ? { isAbroadLead: true } : {})
+            };
+            const wasSaved = saveFeedLead(lead);
+            if (wasSaved) {
+              processedEmailsThisRun.add(emailClean);
+              newLeadsThisLoop++;
+              totalNewLeadsThisRun++;
+              console.log(`[LinkedIn Feed Scouter] ✅ EMAIL Lead #${totalNewLeadsThisRun}: ${emailClean}${c.isKolkataLead ? ' 📍 Kolkata' : ''}`);
+            }
+          }
+        }
+      }
+
+      // ─── Track B: Profile leads — NO AI check, just local keyword match ────────
+      if (profileCandidates.length > 0) {
+        console.log(`[LinkedIn Feed Scouter] 👤 Saving ${profileCandidates.length} profile leads (no AI check)...`);
+        for (const c of profileCandidates) {
+          const profileKey = (c.profileUrl || '').split('?')[0].toLowerCase();
+          if (!profileKey || processedProfilesThisRun.has(profileKey)) continue;
+
+          const lead: FeedLead = {
+            email: '',  // No email for profile leads
+            postText: c.postText.substring(0, 1200),
+            authorName: c.post.authorName || 'Recruiter',
+            authorProfile: c.profileUrl || '',
+            companyName: c.companyName || c.post.authorHeadline || 'Hiring Manager',
+            location: c.location,
+            jobType: c.jobType,
+            extractedAt: new Date().toISOString(),
+            postTime: 'Recent',
+            leadType: 'profile',
+            ...(c.isKolkataLead ? { isKolkataLead: true } : {}),
+            ...(c.isAbroadLead ? { isAbroadLead: true } : {})
+          };
+          const wasSaved = saveFeedLead(lead);
+          if (wasSaved) {
+            processedProfilesThisRun.add(profileKey);
+            newLeadsThisLoop++;
+            totalNewLeadsThisRun++;
+            console.log(`[LinkedIn Feed Scouter] ✅ PROFILE Lead #${totalNewLeadsThisRun}: ${c.post.authorName} (${c.profileUrl})${c.isKolkataLead ? ' 📍 Kolkata' : ''}`);
+          }
+        }
+      }
+    }
+
+    console.log(`[LinkedIn Feed Scouter] Loop #${loopCount} complete — ${newLeadsThisLoop} new lead(s) this loop | Total this run: ${totalNewLeadsThisRun}/${TARGET_LEADS} target`);
+
+    // ─── STEP 6: IMMEDIATE PAGINATION TO NEXT PAGE ─────────────────────────────
+    const nextButton = page.locator('button.artdeco-pagination__button--next, a.artdeco-pagination__button--next, [aria-label="Next"]').first();
+    if (await nextButton.count() > 0 && await nextButton.isEnabled() && await nextButton.isVisible()) {
+      console.log('[LinkedIn Feed Scouter] ➡️ Clicking "Next" pagination button immediately...');
+      await nextButton.scrollIntoViewIfNeeded().catch(() => { });
+
+      try {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => { }),
+          humanClick(page, nextButton)
+        ]);
+
+        const resultsSelector = '.reusable-search__entity-result-list, .reusable-search__result-container, .feed-shared-update-v2, [data-chameleon-result-urn], [data-testid="expandable-text-box"], [componentkey*="feed-commentary"]';
+        await page.waitForSelector(resultsSelector, { state: 'attached', timeout: 4000 }).catch(() => { });
+        await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => { });
+        console.log('[LinkedIn Feed Scouter] ✅ Navigation to next page successful.');
+      } catch (navErr: any) {
+        console.warn(`[LinkedIn Feed Scouter] Navigation to next page failed or timed out: ${navErr.message}`);
+      }
+    } else {
+      console.log('[LinkedIn Feed Scouter] 🔄 Infinite scroll page / No active "Next" button. Continuing to scroll and scan current query.');
+    }
+
+    await delay(50); // Reduced from 150ms for faster throughput
     await closeExtraTabs(page.context());
+
+    // ─── TARGET ENFORCEMENT: Auto-extend if target not met ──────────────────────
+    const elapsed = Date.now() - startTime;
+    const timeRemaining = duration - elapsed;
+    if (timeRemaining < 30000 && totalNewLeadsThisRun < TARGET_LEADS && duration < baseDuration + MAX_EXTENSION_MS) {
+      const extensionMs = Math.min(3 * 60 * 1000, MAX_EXTENSION_MS - (duration - baseDuration)); // Extend by 3 minutes at a time
+      if (extensionMs > 0) {
+        duration += extensionMs;
+        console.log(`[LinkedIn Feed Scouter] ⏰ TARGET NOT MET (${totalNewLeadsThisRun}/${TARGET_LEADS}). Auto-extending by ${Math.round(extensionMs / 60000)}m. New deadline: ${Math.round(duration / 60000)}m total.`);
+      }
+    }
   }
 
-  console.log(`[LinkedIn Feed Scouter] Continuous scouting completed successfully after 10 minutes!`);
-  await updateAgentStatus(page, 'Feed Scouting Done');
+  const emailLeadCount = processedEmailsThisRun.size;
+  const profileLeadCount = processedProfilesThisRun.size;
+  console.log(`[LinkedIn Feed Scouter] ✅ Scouting complete — ${Math.round((Date.now() - startTime) / 60000)} minutes. Total NEW leads: ${totalNewLeadsThisRun} (📧 ${emailLeadCount} email + 👤 ${profileLeadCount} profile). Posts scanned: ${seenPostFingerprints.size}. AI cache: ${_aiMatchCache.size}.`);
+
+  if (totalNewLeadsThisRun < TARGET_LEADS) {
+    console.warn(`[LinkedIn Feed Scouter] ⚠️ Target of ${TARGET_LEADS} leads NOT met. Only collected ${totalNewLeadsThisRun}. Consider adding more search queries or running longer.`);
+  } else {
+    console.log(`[LinkedIn Feed Scouter] 🎯 TARGET MET! Collected ${totalNewLeadsThisRun}/${TARGET_LEADS} leads.`);
+  }
+
+  await updateAgentStatus(page, `Feed Done: ${totalNewLeadsThisRun} leads`);
 
   try {
-    await autoSendFeedOutreach();
+    await autoSendFeedOutreach(processedEmailsThisRun);
   } catch (outreachErr: any) {
     console.error(`[LinkedIn Feed Scouter] Auto outreach failed:`, outreachErr.message);
   }
@@ -2490,7 +3679,7 @@ async function runGoogleSearchScouter(page: any) {
     try {
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(q)}&tbs=qdr:w`;
       console.log(`[Google Search Scouter] Running query: ${q}`);
-      
+
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
       await randomDelay(4000, 7000);
 
@@ -2510,7 +3699,7 @@ async function runGoogleSearchScouter(page: any) {
           const titleEl = card.querySelector('h3');
           const linkEl = card.querySelector('a');
           const snippetEl = card.querySelector('div.VwiC3b, div[style*="-webkit-line-clamp"], div.MU5Ud, div.yDsk6d');
-          
+
           if (titleEl && linkEl) {
             data.push({
               title: titleEl.textContent || '',
@@ -2527,7 +3716,7 @@ async function runGoogleSearchScouter(page: any) {
       for (const res of results) {
         const text = `${res.title}\n${res.snippet}`;
         const emailsMatched = extractEmails(text);
-        
+
         if (emailsMatched && emailsMatched.length > 0) {
           const postTextLower = text.toLowerCase();
 
@@ -2606,7 +3795,7 @@ async function handleLinkedInFormSteps(page: any) {
 
   while (isFormOpen && safetyCounter < 15) {
     safetyCounter++;
-    
+
     // 1. Give form elements and transitions a brief moment to load/mount
     await page.waitForTimeout(150);
 
@@ -2618,7 +3807,7 @@ async function handleLinkedInFormSteps(page: any) {
       'h3:has-text("Application submitted")',
       'h3:has-text("was sent to")'
     ];
-    
+
     let isSuccess = false;
     for (const sel of successIndicators) {
       if (await page.locator(sel).filter({ visible: true }).count() > 0) {
@@ -2672,41 +3861,39 @@ async function handleLinkedInFormSteps(page: any) {
 
     if (await nextBtn.count() > 0) {
       const btnText = (await nextBtn.textContent() || '').toLowerCase();
-      
+
       // Auto-fill typical input fields for this step
       await autoFillStandardInputs(page);
 
-      console.log(`[LinkedIn Form] Clicking navigation button: "${btnText.trim()}"`);
+      console.log(`[LinkedIn Form] ➡️ Clicking: "${btnText.trim()}"`);
       await nextBtn.click({ force: true });
-      await randomDelay(400, 700);
+      await page.waitForTimeout(200); // ✅ Was 400-700ms — cut to 200ms
 
       if (btnText.includes('submit')) {
-        console.log('[LinkedIn Form] ✅ Application submitted successfully!');
-        await updateAgentStatus(page, 'Submitting Application');
+        console.log('[LinkedIn Form] ✅ Application submitted!');
+        await updateAgentStatus(page, 'Submitted ✅');
         isFormOpen = false;
-        // Wait for submit animation/confirmation
-        await randomDelay(800, 1500);
+        await page.waitForTimeout(600); // ✅ Was 800-1500ms
         await updateAgentStatus(page, 'Application Submitted!');
       } else {
-        await updateAgentStatus(page, 'Filling Application Form');
+        await updateAgentStatus(page, 'Filling Form…');
       }
     } else {
-      // If no next button is found, wait 600ms and retry (handles slow frame/question loading)
-      await page.waitForTimeout(600);
+      // No next button — short wait then retry once
+      await page.waitForTimeout(250); // ✅ Was 600ms
       const nextBtnRetry = page.locator(nextBtnSelector).filter({ visible: true }).first();
       if (await nextBtnRetry.count() > 0) {
         continue;
       }
 
-      console.log('[LinkedIn Form] No active next/submit button after wait. Closing modal...');
+      console.log('[LinkedIn Form] No active button after retry. Closing modal.');
       if (await dismissBtn.count() > 0) {
         await dismissBtn.click({ force: true });
-        await randomDelay(300, 600);
-        // Confirm discard if prompted
+        await page.waitForTimeout(200); // ✅ Was 300-600ms
         const discardBtn = page.locator('button[data-control-name="discard_application_confirm_btn"]').filter({ visible: true }).first();
         if (await discardBtn.count() > 0) {
           await discardBtn.click({ force: true });
-          await randomDelay(300, 600);
+          await page.waitForTimeout(200);
         }
       }
       isFormOpen = false;
@@ -2728,7 +3915,7 @@ async function dismissLinkedInPostApplyModal(page: any) {
       'button:has-text("No thanks")',
       'button:has-text("Maybe later")',
       'button:has-text("Done")',
-      
+
       // Modal-prefixed generic close selectors (scoped so they don't match chat carets)
       '.artdeco-modal button[aria-label*="close" i]',
       'div[role="dialog"] button[aria-label*="close" i]',
@@ -2736,12 +3923,12 @@ async function dismissLinkedInPostApplyModal(page: any) {
       'div.artdeco-modal-overlay button[aria-label*="close" i]',
       '#artdeco-modal-outlet button[aria-label="Dismiss"]'
     ];
-    
+
     for (const selector of dismissSelectors) {
       const btn = page.locator(selector).filter({ visible: true }).first();
       if (await btn.count() > 0) {
         console.log(`[LinkedIn] Success modal/overlay detected. Dismissing with button selector: "${selector}"`);
-        await btn.click({ force: true }).catch(() => {});
+        await btn.click({ force: true }).catch(() => { });
         await randomDelay(600, 1000);
         break; // Successfully clicked a dismiss button on the modal, exit loop
       }
@@ -2791,7 +3978,7 @@ async function autoFillStandardInputs(page: any) {
       if (await input.isDisabled() || !(await input.isVisible()) || !(await input.isEditable())) {
         continue;
       }
-      
+
       const val = await input.inputValue();
       if (!val) {
         const labelText = await getLabelTextForInput(page, input);
@@ -2816,7 +4003,7 @@ async function autoFillStandardInputs(page: any) {
         const labelText = await getLabelTextForInput(page, sel);
         const options = await sel.locator('option').all();
         const optionTexts = await Promise.all(options.map((o: any) => o.textContent()));
-        
+
         let matchSelected = false;
 
         if (labelText.includes('notice') || labelText.includes('joining') || labelText.includes('join')) {
@@ -2833,7 +4020,7 @@ async function autoFillStandardInputs(page: any) {
             if (targetIndex !== -1) break;
           }
           if (targetIndex !== -1) {
-            await sel.selectOption({ index: targetIndex }).catch(() => {});
+            await sel.selectOption({ index: targetIndex }).catch(() => { });
             matchSelected = true;
           }
         } else if (labelText.includes('experience') || labelText.includes('year')) {
@@ -2846,7 +4033,7 @@ async function autoFillStandardInputs(page: any) {
             }
           }
           if (targetIndex !== -1) {
-            await sel.selectOption({ index: targetIndex }).catch(() => {});
+            await sel.selectOption({ index: targetIndex }).catch(() => { });
             matchSelected = true;
           }
         } else if (labelText.includes('currency') || labelText.includes('salary') || labelText.includes('ctc') || labelText.includes('inr') || labelText.includes('rupee')) {
@@ -2859,7 +4046,7 @@ async function autoFillStandardInputs(page: any) {
             }
           }
           if (targetIndex !== -1) {
-            await sel.selectOption({ index: targetIndex }).catch(() => {});
+            await sel.selectOption({ index: targetIndex }).catch(() => { });
             matchSelected = true;
           }
         } else if (labelText.includes('country') || labelText.includes('nation')) {
@@ -2872,12 +4059,12 @@ async function autoFillStandardInputs(page: any) {
             }
           }
           if (targetIndex !== -1) {
-            await sel.selectOption({ index: targetIndex }).catch(() => {});
+            await sel.selectOption({ index: targetIndex }).catch(() => { });
             matchSelected = true;
           }
         } else if (labelText.includes('interview') || labelText.includes('availability') || labelText.includes('time slot') || labelText.includes('schedule') || labelText.includes('date')) {
           const targetIndex = optionTexts.length > 1 ? 1 : 0;
-          await sel.selectOption({ index: targetIndex }).catch(() => {});
+          await sel.selectOption({ index: targetIndex }).catch(() => { });
           matchSelected = true;
         }
 
@@ -2885,29 +4072,29 @@ async function autoFillStandardInputs(page: any) {
         if (!matchSelected && optionTexts.length > 1) {
           console.log(`[LinkedIn Form] Uncommon select dropdown: "${labelText}". Querying Groq AI...`);
           try {
-            await sel.focus().catch(() => {});
-          } catch {}
+            await sel.focus().catch(() => { });
+          } catch { }
           await updateAgentStatus(page, 'Thinking with AI');
           const aiOptionIndexStr = await askAI(labelText, 'select', optionTexts);
           const aiOptionIndex = parseInt(aiOptionIndexStr);
           if (!isNaN(aiOptionIndex) && aiOptionIndex >= 0 && aiOptionIndex < optionTexts.length) {
             console.log(`[LinkedIn Form] Selecting AI option: "${optionTexts[aiOptionIndex]}"`);
             await updateAgentStatus(page, `Selecting "${optionTexts[aiOptionIndex]}"`);
-            await sel.selectOption({ index: aiOptionIndex }).catch(() => {});
+            await sel.selectOption({ index: aiOptionIndex }).catch(() => { });
           } else {
-            await sel.selectOption({ index: 1 }).catch(() => {});
+            await sel.selectOption({ index: 1 }).catch(() => { });
           }
           await updateAgentStatus(page, 'Working');
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 
   // Handle Radio buttons group solver
   try {
     const radioInputs = page.locator('input[type="radio"], [role="radio"]');
     const radioCount = await radioInputs.count();
-    
+
     if (radioCount > 0) {
       // 1. Group inputs by name attribute or parent container
       const groups: { [name: string]: any[] } = {};
@@ -2919,12 +4106,12 @@ async function autoFillStandardInputs(page: any) {
           groups[name].push(rb);
         }
       }
-      
+
       // 2. Process each group
       for (const name of Object.keys(groups)) {
         const groupInputs = groups[name];
         if (groupInputs.length === 0) continue;
-        
+
         // Check if any radio in the group is already checked
         let alreadyChecked = false;
         for (const rb of groupInputs) {
@@ -2937,15 +4124,15 @@ async function autoFillStandardInputs(page: any) {
           console.log(`[Form Solver] Radio group "${name}" already has a selected option. Skipping.`);
           continue;
         }
-        
+
         // Find labels/options text for each radio
         const optionTexts: string[] = [];
         const validRadios: any[] = [];
-        
+
         for (const rb of groupInputs) {
           const id = await rb.getAttribute('id') || '';
           const valueAttr = await rb.getAttribute('value') || '';
-          
+
           let optionText = '';
           if (id) {
             // Find label for this id
@@ -2954,7 +4141,7 @@ async function autoFillStandardInputs(page: any) {
               optionText = (await labelEl.textContent() || '').trim();
             }
           }
-          
+
           if (!optionText) {
             // Check if nested in a label
             const parentLabel = rb.locator('xpath=./ancestor::label').first();
@@ -2962,11 +4149,11 @@ async function autoFillStandardInputs(page: any) {
               optionText = (await parentLabel.textContent() || '').trim();
             }
           }
-          
+
           if (!optionText) {
             optionText = valueAttr.trim();
           }
-          
+
           if (optionText) {
             // Clean up any extra newlines or spacing
             optionText = optionText.replace(/\s+/g, ' ').trim();
@@ -2974,18 +4161,18 @@ async function autoFillStandardInputs(page: any) {
             validRadios.push(rb);
           }
         }
-        
+
         if (validRadios.length === 0) continue;
-        
+
         // Find the question text
         let questionText = '';
-        
+
         // Method A: Check for legend or preceding headings in parent containers
         try {
           const firstRadio = validRadios[0];
           // Travel up to a container div
           const container = firstRadio.locator('xpath=./ancestor::div[contains(@class, "group") or contains(@class, "question") or contains(@class, "container") or contains(@class, "section") or contains(@class, "card") or contains(@class, "row") or contains(@class, "wrapper") or @role="group"][1]');
-          
+
           if (await container.count() > 0) {
             // Find headers or labels inside container
             const headerLocators = [
@@ -3011,8 +4198,8 @@ async function autoFillStandardInputs(page: any) {
               }
             }
           }
-        } catch {}
-        
+        } catch { }
+
         // Method B: Preceding sibling text if Method A failed
         if (!questionText) {
           try {
@@ -3021,28 +4208,28 @@ async function autoFillStandardInputs(page: any) {
             if (await precedingLabel.count() > 0) {
               questionText = (await precedingLabel.textContent() || '').trim();
             }
-          } catch {}
+          } catch { }
         }
-        
+
         // Fallback or generic name cleaning
         if (!questionText) {
           questionText = name.replace(/[-_]/g, ' ');
         }
-        
+
         questionText = questionText.replace(/\s+/g, ' ').trim();
         console.log(`[Form Solver] Radio group "${name}" Question: "${questionText}" | Options: ${JSON.stringify(optionTexts)}`);
-        
+
         // Determine option using AI solver
         await updateAgentStatus(page, 'Thinking with AI');
         const aiSelectionStr = await askAI(questionText, 'select', optionTexts);
         const aiSelectionIndex = parseInt(aiSelectionStr);
-        
+
         if (!isNaN(aiSelectionIndex) && aiSelectionIndex >= 0 && aiSelectionIndex < validRadios.length) {
           const selectedRadio = validRadios[aiSelectionIndex];
           const selectedText = optionTexts[aiSelectionIndex];
           console.log(`[Form Solver] Selecting AI chosen radio option: "${selectedText}" (Index ${aiSelectionIndex})`);
           await updateAgentStatus(page, `Selecting "${selectedText}"`);
-          await selectedRadio.check({ force: true }).catch(() => {});
+          await selectedRadio.check({ force: true }).catch(() => { });
         } else {
           // Default heuristic fallback: check "Yes", "More than 4 years", or first item
           let fallbackIndex = 0;
@@ -3054,7 +4241,7 @@ async function autoFillStandardInputs(page: any) {
             }
           }
           console.log(`[Form Solver] Fallback selecting radio index: ${fallbackIndex}`);
-          await validRadios[fallbackIndex].check({ force: true }).catch(() => {});
+          await validRadios[fallbackIndex].check({ force: true }).catch(() => { });
         }
         await updateAgentStatus(page, 'Working');
       }
@@ -3067,7 +4254,7 @@ async function autoFillStandardInputs(page: any) {
   try {
     const checkboxes = page.locator('input[type="checkbox"], [role="checkbox"]');
     const checkboxCount = await checkboxes.count();
-    
+
     if (checkboxCount > 0) {
       console.log(`[Form Solver] Found ${checkboxCount} checkbox fields. Resolving...`);
       for (let i = 0; i < checkboxCount; i++) {
@@ -3092,11 +4279,11 @@ async function autoFillStandardInputs(page: any) {
             // Check preceding sibling or name
             labelText = (await cb.getAttribute('name') || '').replace(/[-_]/g, ' ');
           }
-          
+
           labelText = labelText.replace(/\s+/g, ' ').trim().toLowerCase();
-          
+
           // Heuristics for automatic checkbox checking
-          const shouldCheck = 
+          const shouldCheck =
             // 1. Consent, terms, declarations, authorize, certify, truth, confirmation
             labelText.includes('agree') ||
             labelText.includes('accept') ||
@@ -3131,10 +4318,10 @@ async function autoFillStandardInputs(page: any) {
             labelText.includes('node') ||
             labelText.includes('redux') ||
             labelText.includes('git');
-            
+
           if (shouldCheck) {
             console.log(`[Form Solver] Checking checkbox option: "${labelText}"`);
-            await cb.check({ force: true }).catch(() => {});
+            await cb.check({ force: true }).catch(() => { });
           }
         }
       }
@@ -3153,7 +4340,7 @@ async function autoFillStandardInputs(page: any) {
 // -------------------------------------------------------------
 async function runInstahyrePipeline(page: any) {
   console.log('\n[Instahyre] Starting job application pipeline...');
-  
+
   // Navigate to Instahyre dashboard/jobs page
   try {
     await page.goto('https://www.instahyre.com/candidate/opportunities/', { waitUntil: 'domcontentloaded' });
@@ -3171,10 +4358,10 @@ async function runInstahyrePipeline(page: any) {
       loggedIn = true;
     } else {
       console.log('[Instahyre] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
-      
+
       const startTime = Date.now();
       const timeout = 5 * 60 * 1000; // 5 minutes timeout
-      
+
       while (!loggedIn && Date.now() - startTime < timeout) {
         if (page.isClosed()) {
           console.error('[Instahyre] Browser page was closed. Skipping Instahyre...');
@@ -3189,7 +4376,7 @@ async function runInstahyrePipeline(page: any) {
         return;
       }
       console.log('[Instahyre] Logged in successfully!');
-      }
+    }
   }
 
   // Scroll to trigger lazy loading of jobs
@@ -3268,7 +4455,7 @@ async function fillIndeedStepFields(page: any) {
       if (await input.isDisabled() || !(await input.isVisible()) || !(await input.isEditable())) {
         continue;
       }
-      
+
       const value = await input.inputValue();
       if (!value) {
         const labelText = await getLabelTextForInput(page, input);
@@ -3292,7 +4479,7 @@ async function fillIndeedStepFields(page: any) {
       const labelText = await getLabelTextForInput(page, sel);
       const options = await sel.locator('option').all();
       const optionTexts = await Promise.all(options.map((o: any) => o.textContent()));
-      
+
       let matchSelected = false;
 
       if (labelText.includes('notice') || labelText.includes('joining') || labelText.includes('join')) {
@@ -3309,7 +4496,7 @@ async function fillIndeedStepFields(page: any) {
           if (targetIndex !== -1) break;
         }
         if (targetIndex !== -1) {
-          await sel.selectOption({ index: targetIndex }).catch(() => {});
+          await sel.selectOption({ index: targetIndex }).catch(() => { });
           matchSelected = true;
         }
       } else if (labelText.includes('experience') || labelText.includes('year')) {
@@ -3322,7 +4509,7 @@ async function fillIndeedStepFields(page: any) {
           }
         }
         if (targetIndex !== -1) {
-          await sel.selectOption({ index: targetIndex }).catch(() => {});
+          await sel.selectOption({ index: targetIndex }).catch(() => { });
           matchSelected = true;
         }
       } else if (labelText.includes('currency') || labelText.includes('salary') || labelText.includes('ctc') || labelText.includes('inr') || labelText.includes('rupee')) {
@@ -3335,7 +4522,7 @@ async function fillIndeedStepFields(page: any) {
           }
         }
         if (targetIndex !== -1) {
-          await sel.selectOption({ index: targetIndex }).catch(() => {});
+          await sel.selectOption({ index: targetIndex }).catch(() => { });
           matchSelected = true;
         }
       } else if (labelText.includes('country') || labelText.includes('nation')) {
@@ -3348,7 +4535,7 @@ async function fillIndeedStepFields(page: any) {
           }
         }
         if (targetIndex !== -1) {
-          await sel.selectOption({ index: targetIndex }).catch(() => {});
+          await sel.selectOption({ index: targetIndex }).catch(() => { });
           matchSelected = true;
         }
       }
@@ -3357,21 +4544,21 @@ async function fillIndeedStepFields(page: any) {
       if (!matchSelected && optionTexts.length > 1) {
         console.log(`[Indeed Form] Uncommon select dropdown: "${labelText}". Querying Groq AI...`);
         try {
-          await sel.focus().catch(() => {});
-        } catch {}
+          await sel.focus().catch(() => { });
+        } catch { }
         await updateAgentStatus(page, 'Thinking with AI');
         const aiOptionIndexStr = await askAI(labelText, 'select', optionTexts);
         const aiOptionIndex = parseInt(aiOptionIndexStr);
         if (!isNaN(aiOptionIndex) && aiOptionIndex >= 0 && aiOptionIndex < optionTexts.length) {
           console.log(`[Indeed Form] Selecting AI option: "${optionTexts[aiOptionIndex]}"`);
           await updateAgentStatus(page, `Selecting "${optionTexts[aiOptionIndex]}"`);
-          await sel.selectOption({ index: aiOptionIndex }).catch(() => {});
+          await sel.selectOption({ index: aiOptionIndex }).catch(() => { });
         } else {
-          await sel.selectOption({ index: 1 }).catch(() => {});
+          await sel.selectOption({ index: 1 }).catch(() => { });
         }
         await updateAgentStatus(page, 'Working');
       }
-    } catch {}
+    } catch { }
   }
 
   // D. Checkboxes
@@ -3380,7 +4567,7 @@ async function fillIndeedStepFields(page: any) {
   for (let i = 0; i < checkboxCount; i++) {
     const cb = checkboxes.nth(i);
     if (!(await cb.isChecked())) {
-      await cb.check({ force: true }).catch(() => {});
+      await cb.check({ force: true }).catch(() => { });
     }
   }
 
@@ -3389,14 +4576,14 @@ async function fillIndeedStepFields(page: any) {
     const radioButtons = page.locator('input[type="radio"]');
     const radioCount = await radioButtons.count();
     const groups: { [name: string]: any[] } = {};
-    
+
     for (let i = 0; i < radioCount; i++) {
       const rb = radioButtons.nth(i);
       const name = await rb.getAttribute('name') || `group-${i}`;
       if (!groups[name]) groups[name] = [];
       groups[name].push(rb);
     }
-    
+
     for (const name of Object.keys(groups)) {
       const list = groups[name];
       let anyChecked = false;
@@ -3417,10 +4604,10 @@ async function fillIndeedStepFields(page: any) {
           }
         }
         console.log(`[Indeed Form] Selecting radio option for group "${name}"`);
-        await targetRb.check({ force: true }).catch(() => {});
+        await targetRb.check({ force: true }).catch(() => { });
       }
     }
-  } catch {}
+  } catch { }
 
   // Run self-correcting validation repair to fix numeric/format errors before submitting
   await checkAndFixValidationErrors(page);
@@ -3432,7 +4619,7 @@ async function getIndeedFrame(page: any) {
     if (await page.locator('button.ia-continueButton, button:has-text("Continue"), button:has-text("Next"), button:has-text("Submit")').count() > 0) {
       return page;
     }
-    
+
     // Look at all frames
     const frames = page.frames();
     for (const f of frames) {
@@ -3440,9 +4627,9 @@ async function getIndeedFrame(page: any) {
         if (f.url().includes('indeed') || f.name().includes('indeed') || await f.locator('button.ia-continueButton, button:has-text("Continue"), button:has-text("Next"), button:has-text("Submit")').count() > 0) {
           return f;
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
   return page;
 }
 
@@ -3451,7 +4638,7 @@ async function handleIndeedApplyForm(page: any, isNewTab = true) {
   console.log('[Indeed Form] Waiting 1.2 seconds for form contents to load...');
   await page.waitForTimeout(1200);
   console.log('[Indeed Form] Starting auto-fill wizard on Indeed Apply page...');
-  
+
   let safetyCounter = 0;
   let isFormOpen = true;
 
@@ -3463,10 +4650,10 @@ async function handleIndeedApplyForm(page: any, isNewTab = true) {
 
     // Look for continue / submit button (ignoring preview and matching only visible buttons)
     const continueBtn = frame.locator('button.ia-continueButton, button:has-text("Continue"), button:has-text("Next"), button:has-text("Submit"), button:has-text("Review"):not(:has-text("preview")):not(:has-text("Preview")), button:has-text("Submit application"), button[class*="continue"], button[class*="Submit"]').filter({ visible: true }).first();
-    
+
     try {
       await continueBtn.waitFor({ state: 'visible', timeout: 5000 });
-    } catch {}
+    } catch { }
 
     if (await continueBtn.count() > 0) {
       const btnText = (await continueBtn.textContent() || '').toLowerCase();
@@ -3497,35 +4684,52 @@ async function handleIndeedApplyForm(page: any, isNewTab = true) {
     if (isNewTab) {
       await page.close();
     }
-  } catch {}
+  } catch { }
 }
 
 async function runIndeedPipeline(page: any) {
   console.log('\n[Indeed] Starting job application pipeline...');
   await updateAgentStatus(page, 'Searching for Jobs');
-  
+
   const keyword = getRandomSearchKeyword();
   console.log(`[Indeed] Selected search keyword: "${keyword}"`);
-  
-  const searchUrl = `https://in.indeed.com/jobs?q=${encodeURIComponent(keyword)}&l=India&sort=date&fromage=7`;
+
+  const searchUrl = `https://in.indeed.com/jobs?q=${encodeURIComponent(keyword)}&sort=date&fromage=7`;
   try {
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+    // Inject CSS to hide modals/consent popups/overlays that could block interaction
+    await page.addStyleTag({
+      content: `
+        div[class*="drawer"], div[class*="popup"], div[class*="modal"],
+        div[class*="overlay"], div[class*="dialog"], [class*="upsell"],
+        #cookie-consent-banner, .cookie-consent-banner, div[id*="cookie"], div[class*="cookie"] {
+          display: none !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          width: 0 !important;
+          height: 0 !important;
+        }
+      `
+    }).catch(() => { });
   } catch (err: any) {
     console.warn(`[Indeed] Warning during navigation: ${err.message}`);
   }
   await randomDelay(800, 1500);
   let loggedIn = await isIndeedLoggedIn(page);
+  let loginPerformed = false;
 
   if (!loggedIn) {
+    loginPerformed = true;
     const autoLoginSuccess = await attemptIndeedLogin(page);
     if (autoLoginSuccess) {
       loggedIn = true;
     } else {
       console.log('[Indeed] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window if you want to sign in (auto-detecting)...');
-      
+
       const startTime = Date.now();
       const timeout = 3 * 60 * 1000; // 3 minutes timeout
-      
+
       while (!loggedIn && Date.now() - startTime < timeout) {
         if (page.isClosed()) {
           break;
@@ -3534,7 +4738,18 @@ async function runIndeedPipeline(page: any) {
         loggedIn = await isIndeedLoggedIn(page);
       }
       console.log('[Indeed] Logged in or continuing...');
-      }
+    }
+  }
+
+  // If we had to log in, navigate back to the jobs search page
+  if (loginPerformed) {
+    console.log('[Indeed] Navigating back to jobs search page...');
+    try {
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      await randomDelay(800, 1500);
+    } catch (err: any) {
+      console.warn(`[Indeed] Warning returning to search page: ${err.message}`);
+    }
   }
 
   // Scroll to load all cards
@@ -3555,7 +4770,7 @@ async function runIndeedPipeline(page: any) {
     try {
       let card = page.locator('div.job_seen_beacon').nth(i);
       await updateAgentStatus(page, `Opening Job Details (${i + 1}/${count})`);
-      
+
       try {
         const [openedPage] = await Promise.all([
           page.context().waitForEvent('page', { timeout: 3000 }),
@@ -3586,7 +4801,7 @@ async function runIndeedPipeline(page: any) {
 
       const easilyApplyBtn = targetPage.locator('#indeedApplyButton');
       if (await easilyApplyBtn.count() > 0) {
-        await easilyApplyBtn.first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+        await easilyApplyBtn.first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => { });
         if (await easilyApplyBtn.first().isDisabled()) {
           console.log(`[Indeed] 'Easily apply' button is disabled for "${title}". Skipping...`);
           continue;
@@ -3612,7 +4827,7 @@ async function runIndeedPipeline(page: any) {
           } catch (err: any) {
             console.error('[Indeed] Error processing form in new tab:', err.message);
           } finally {
-            await applyPage.close().catch(() => {});
+            await applyPage.close().catch(() => { });
           }
         } else {
           try {
@@ -3622,7 +4837,7 @@ async function runIndeedPipeline(page: any) {
           } finally {
             if (!newPage) {
               console.log('[Indeed] Reloading main page to clear any modals and restore job list...');
-              await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+              await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => { });
               await randomDelay(800, 1500);
             }
           }
@@ -3635,7 +4850,7 @@ async function runIndeedPipeline(page: any) {
       console.error(`[Indeed] Error processing Indeed card at index ${i}:`, err.message);
     } finally {
       if (newPage) {
-        await newPage.close().catch(() => {});
+        await newPage.close().catch(() => { });
       }
       await closeExtraTabs(page.context());
     }
@@ -3670,10 +4885,10 @@ async function handleNaukriFormSteps(page: any) {
       '[role="radio"]',
       '[role="checkbox"]'
     ].join(', ');
-    
+
     const inputs = page.locator(inputSelector).filter({ visible: true });
     const count = await inputs.count();
-    
+
     // Check if there is any questionnaire form overlay or drawer visible on the page
     const hasForm = count > 0 || await page.locator([
       'div[class*="drawer"]',
@@ -3688,7 +4903,7 @@ async function handleNaukriFormSteps(page: any) {
       '[class*="sidePanel"]',
       '[class*="bot"]'
     ].join(', ')).filter({ visible: true }).count() > 0;
-    
+
     if (count === 0 && !hasForm) {
       console.log('[Naukri Form] No visible form elements, checkboxes, or questionnaire overlays found. Proceeding...');
       break;
@@ -3736,7 +4951,7 @@ async function handleNaukriFormSteps(page: any) {
         await humanClick(page, btn);
         await randomDelay(800, 1500);
         clicked = true;
-        
+
         if (btnText.includes('submit') || btnText.includes('apply')) {
           console.log('[Naukri Form] Form submitted!');
           isFormOpen = false;
@@ -3758,13 +4973,28 @@ async function handleNaukriFormSteps(page: any) {
 async function runNaukriPipeline(page: any) {
   console.log('\n[Naukri] Starting job application pipeline...');
   await updateAgentStatus(page, 'Searching for Jobs');
-  
+
   const keyword = getRandomSearchKeyword();
   console.log(`[Naukri] Selected search keyword: "${keyword}"`);
-  
-  const searchUrl = `https://www.naukri.com/jobs-in-india?k=${encodeURIComponent(keyword.toLowerCase())}&l=india&sort=freshness`;
+
+  const searchUrl = `https://www.naukri.com/jobs?k=${encodeURIComponent(keyword.toLowerCase())}&sort=freshness`;
   try {
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+    // Inject CSS to hide modals/consent popups/overlays that could block interaction
+    await page.addStyleTag({
+      content: `
+        div[class*="drawer"], div[class*="popup"], div[class*="modal"],
+        div[class*="overlay"], div[class*="dialog"], [class*="upsell"],
+        #cookie-consent-banner, .cookie-consent-banner, div[id*="cookie"], div[class*="cookie"] {
+          display: none !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          width: 0 !important;
+          height: 0 !important;
+        }
+      `
+    }).catch(() => { });
   } catch (err: any) {
     console.warn(`[Naukri] Warning during navigation: ${err.message}`);
   }
@@ -3772,17 +5002,19 @@ async function runNaukriPipeline(page: any) {
 
   // Check login
   let loggedIn = await isNaukriLoggedIn(page);
+  let loginPerformed = false;
   if (!loggedIn) {
+    loginPerformed = true;
     const autoLoginSuccess = await attemptNaukriLogin(page);
     if (autoLoginSuccess) {
       loggedIn = true;
     } else {
       console.log('[Naukri] Auto-login failed or credentials missing. Waiting for you to log in manually in the open Chrome window (auto-detecting login)...');
       await updateAgentStatus(page, 'Waiting for Login');
-      
+
       const startTime = Date.now();
       const timeout = 5 * 60 * 1000; // 5 minutes timeout
-      
+
       while (!loggedIn && Date.now() - startTime < timeout) {
         if (page.isClosed()) {
           console.error('[Naukri] Browser page was closed. Skipping Naukri...');
@@ -3797,7 +5029,18 @@ async function runNaukriPipeline(page: any) {
         return;
       }
       console.log('[Naukri] Logged in successfully!');
-      }
+    }
+  }
+
+  // If we had to log in, navigate back to the jobs search page
+  if (loginPerformed) {
+    console.log('[Naukri] Navigating back to jobs search page...');
+    try {
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded' });
+      await randomDelay(800, 1500);
+    } catch (err: any) {
+      console.warn(`[Naukri] Warning returning to search page: ${err.message}`);
+    }
   }
 
   // Scroll to trigger lazy loading of jobs
@@ -3819,12 +5062,12 @@ async function runNaukriPipeline(page: any) {
       let card = page.locator('.srp-jobtuple-wrapper, div[class*="jobTuple"]').nth(i);
       try {
         await card.scrollIntoViewIfNeeded({ timeout: 3000 });
-      } catch {}
+      } catch { }
 
       // Extract details
       const titleEl = card.locator('a.title, a[class*="title"]');
       const title = (await titleEl.textContent({ timeout: 2000 }).catch(() => '')).trim();
-      
+
       const compEl = card.locator('.comp-name, a[class*="comp-name"]');
       const company = (await compEl.textContent({ timeout: 2000 }).catch(() => '')).trim();
 
@@ -3838,10 +5081,10 @@ async function runNaukriPipeline(page: any) {
         console.log(`[Naukri] Skipping job: "${title}" at "${company}"`);
         continue;
       }
- 
+
       console.log(`[Naukri] Processing matching job: "${title}" at "${company}"`);
       await updateAgentStatus(page, `Opening Job Details (${i + 1}/${count})`);
-      
+
       try {
         // Naukri links open in a new tab
         const [openedPage] = await Promise.all([
@@ -3849,12 +5092,19 @@ async function runNaukriPipeline(page: any) {
           humanClick(page, titleEl)
         ]);
         newPage = openedPage;
-        
+
         await newPage.waitForLoadState('domcontentloaded');
         await randomDelay(500, 1000);
-        
-        const applyBtn = newPage.locator('button:has-text("Apply"), button:has-text("Apply Now"), button:has-text("Apply on Company Site"), .apply-button, #apply-button, .apply-btn').filter({ visible: true }).first();
-        if (await applyBtn.count() > 0) {
+
+        // ✅ ACCURACY & BUGFIX: Added retry loop since Naukri loads button async after DOM ready
+        let applyBtn: any = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const btn = newPage.locator('button:has-text("Apply"), button:has-text("Apply Now"), button:has-text("Apply on Company Site"), .apply-button, #apply-button, .apply-btn').filter({ visible: true }).first();
+          if (await btn.count() > 0) { applyBtn = btn; break; }
+          await newPage.waitForTimeout(400);
+        }
+
+        if (applyBtn) {
           const btnText = (await applyBtn.textContent() || '').toLowerCase();
           if (btnText.includes('apply on company site') || btnText.includes('company site')) {
             console.log(`[Naukri] Job "${title}" requires external site application. Clicking to open for you...`);
@@ -3866,10 +5116,10 @@ async function runNaukriPipeline(page: any) {
             await updateAgentStatus(newPage, 'Submitting Application');
             await humanClick(newPage, applyBtn);
             await randomDelay(800, 1500);
-            
+
             // Handle Naukri questionnaire / form steps
             await handleNaukriFormSteps(newPage);
-            
+
             console.log(`[Naukri] ✅ Application submitted/initiated for "${title}"!`);
             await updateAgentStatus(newPage, 'Application Submitted!');
             await newPage.waitForTimeout(400);
@@ -3883,7 +5133,7 @@ async function runNaukriPipeline(page: any) {
       console.error(`[Naukri] Error processing Naukri card at index ${i}:`, err.message);
     } finally {
       if (newPage) {
-        await newPage.close().catch(() => {});
+        await newPage.close().catch(() => { });
       }
       await closeExtraTabs(page.context());
     }
@@ -3897,14 +5147,16 @@ async function runNaukriPipeline(page: any) {
 async function main() {
   console.log('=== Starting Personal AI Agent Outbound Worker ===');
 
-  // Automatically close existing Chrome automation instances to release profile lock
+  // Automatically close zombie Chrome automation instances using this profile
   try {
     if (process.platform === 'win32') {
-      console.log('[Init] Closing open Chrome instances to release profile lock...');
-      execSync('taskkill /F /IM chrome.exe', { stdio: 'ignore' });
-      await delay(1500);
+      console.log('[Init] Closing background Chrome automation processes targeting the profile...');
+      execSync('powershell -Command "$p = (Get-CimInstance Win32_Process -Filter \'Name = \'\'chrome.exe\'\' and CommandLine like \'\'%automation-profile%\'\'\').ProcessId; if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }"', { stdio: 'ignore' });
     }
-  } catch {}
+  } catch (err: any) {
+    console.warn(`[Init] Warning closing zombie Chrome processes: ${err.message}`);
+  }
+  await delay(1200); // Always wait to release profile lock
 
   if (!fs.existsSync(CHROME_USER_DATA_DIR)) {
     console.warn(`[Warning] Chrome User Data Directory not found at: ${CHROME_USER_DATA_DIR}`);
@@ -3913,6 +5165,13 @@ async function main() {
 
   console.log(`[Init] Using Chrome profile path: ${CHROME_USER_DATA_DIR}`);
   console.log(`[Init] Profile: ${CHROME_PROFILE_NAME}`);
+
+  const portalsEnv = process.env.PORTALS;
+  const enabledPortals = portalsEnv
+    ? portalsEnv.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    : ['linkedin', 'instahyre', 'indeed', 'naukri', 'feed'];
+
+  console.log('[Init] Selected portals for execution:', enabledPortals);
 
   try {
     const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
@@ -3926,58 +5185,9 @@ async function main() {
       ignoreDefaultArgs: ['--enable-automation', '--no-sandbox']
     });
 
-    const portalsEnv = process.env.PORTALS;
-    const enabledPortals = portalsEnv 
-      ? portalsEnv.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
-      : ['linkedin', 'instahyre', 'indeed', 'naukri', 'feed'];
-
-    console.log('[Init] Selected portals for execution:', enabledPortals);
-
+    globalMainPages.clear();
     const primaryPage = context.pages()[0] || await context.newPage();
-    let linkedinPage: any = null;
-    let instahyrePage: any = null;
-    let indeedPage: any = null;
-    let naukriPage: any = null;
-
-    let pageAssigned = false;
-    if (enabledPortals.includes('linkedin') || enabledPortals.includes('feed')) {
-      linkedinPage = primaryPage;
-      pageAssigned = true;
-    }
-    if (enabledPortals.includes('instahyre')) {
-      if (!pageAssigned) {
-        instahyrePage = primaryPage;
-        pageAssigned = true;
-      } else {
-        instahyrePage = await context.newPage();
-      }
-    }
-    if (enabledPortals.includes('indeed')) {
-      if (!pageAssigned) {
-        indeedPage = primaryPage;
-        pageAssigned = true;
-      } else {
-        indeedPage = await context.newPage();
-      }
-    }
-    if (enabledPortals.includes('naukri')) {
-      if (!pageAssigned) {
-        naukriPage = primaryPage;
-        pageAssigned = true;
-      } else {
-        naukriPage = await context.newPage();
-      }
-    }
-
-    if (!pageAssigned) {
-      linkedinPage = primaryPage;
-    }
-
-    if (linkedinPage) globalMainPages.add(linkedinPage);
-    if (instahyrePage) globalMainPages.add(instahyrePage);
-    if (indeedPage) globalMainPages.add(indeedPage);
-    if (naukriPage) globalMainPages.add(naukriPage);
-
+    globalMainPages.add(primaryPage);
 
     // Helper to register stealth scripts and visual cursor on a page
     const registerStealthAndCursor = async (p: any) => {
@@ -4001,77 +5211,82 @@ async function main() {
       await registerStealthAndCursor(p);
     }
 
-    console.log('[Init] Opening pipelines in separate tabs...');
-    
-    // Navigate in parallel to prepare the tabs immediately
-    const navPromises: Promise<any>[] = [];
-    if (linkedinPage) {
-      if (enabledPortals.includes('linkedin')) {
-        navPromises.push(linkedinPage.goto('https://www.linkedin.com/jobs/search/?f_AL=true&keywords=Senior%20Front-End%20Developer&location=India&sortBy=DD&f_TPR=r604800', { waitUntil: 'domcontentloaded' }).catch(() => {}));
-      } else if (enabledPortals.includes('feed')) {
-        navPromises.push(linkedinPage.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' }).catch(() => {}));
-      }
-    }
-    if (instahyrePage) {
-      navPromises.push(instahyrePage.goto('https://www.instahyre.com/candidate/opportunities/', { waitUntil: 'domcontentloaded' }).catch(() => {}));
-    }
-    if (indeedPage) {
-      navPromises.push(indeedPage.goto('https://in.indeed.com/jobs?q=Senior+Front-End+Developer&l=India&sort=date&fromage=7', { waitUntil: 'domcontentloaded' }).catch(() => {}));
-    }
-    if (naukriPage) {
-      navPromises.push(naukriPage.goto('https://www.naukri.com/senior-frontend-developer-jobs-in-india?k=senior%20frontend%20developer&l=india&sort=freshness', { waitUntil: 'domcontentloaded' }).catch(() => {}));
-    }
-    
-    if (navPromises.length > 0) {
-      await Promise.all(navPromises);
-    }
-
-    // 1. Execute LinkedIn Pipeline or Feed Scouter Only
-    if (linkedinPage && !linkedinPage.isClosed()) {
+    // ─── STEP 1: Execute LinkedIn Feed Scouter ───
+    if (enabledPortals.includes('feed')) {
+      console.log('[Init] Starting LinkedIn Feed Scouter...');
       try {
-        await linkedinPage.bringToFront();
-        if (enabledPortals.includes('linkedin')) {
-          await runLinkedInPipeline(linkedinPage);
-        } else if (enabledPortals.includes('feed')) {
-          await runLinkedInFeedScouter(linkedinPage);
-        }
+        await primaryPage.bringToFront();
+        await primaryPage.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' }).catch(() => { });
+        await runLinkedInFeedScouter(primaryPage);
       } catch (e: any) {
-        console.error('[LinkedIn] Pipeline failed with error:', e.message);
+        console.error('[LinkedIn Scouter] Pipeline failed with error:', e.message);
       }
     }
 
-    // 2. Execute Instahyre Pipeline
-    if (instahyrePage && !instahyrePage.isClosed()) {
+    // ─── STEP 2: Execute LinkedIn Easy Apply Pipeline ───
+    if (enabledPortals.includes('linkedin')) {
+      console.log('[Init] Starting LinkedIn Job Apply Pipeline...');
+      try {
+        await primaryPage.bringToFront();
+        await primaryPage.goto('https://www.linkedin.com/jobs/search/?f_AL=true&keywords=Senior%20Front-End%20Developer&location=India&sortBy=DD&f_TPR=r604800', { waitUntil: 'domcontentloaded' }).catch(() => { });
+        await runLinkedInPipeline(primaryPage);
+      } catch (e: any) {
+        console.error('[LinkedIn Job Apply] Pipeline failed with error:', e.message);
+      }
+    }
+
+    // ─── STEP 3: Execute Instahyre Pipeline ───
+    if (enabledPortals.includes('instahyre')) {
+      console.log('[Init] Starting Instahyre Pipeline...');
+      const instahyrePage = await context.newPage();
+      globalMainPages.add(instahyrePage);
       try {
         await instahyrePage.bringToFront();
+        await instahyrePage.goto('https://www.instahyre.com/candidate/opportunities/', { waitUntil: 'domcontentloaded' }).catch(() => { });
         await runInstahyrePipeline(instahyrePage);
       } catch (e: any) {
         console.error('[Instahyre] Pipeline failed with error:', e.message);
+      } finally {
+        globalMainPages.delete(instahyrePage);
+        await instahyrePage.close().catch(() => { });
       }
     }
 
-    // 3. Execute Indeed Pipeline
-    if (indeedPage && !indeedPage.isClosed()) {
+    // ─── STEP 4: Execute Indeed Pipeline ───
+    if (enabledPortals.includes('indeed')) {
+      console.log('[Init] Starting Indeed Pipeline...');
+      const indeedPage = await context.newPage();
+      globalMainPages.add(indeedPage);
       try {
         await indeedPage.bringToFront();
         await runIndeedPipeline(indeedPage);
       } catch (e: any) {
         console.error('[Indeed] Pipeline failed with error:', e.message);
+      } finally {
+        globalMainPages.delete(indeedPage);
+        await indeedPage.close().catch(() => { });
       }
     }
 
-    // 4. Execute Naukri Pipeline
-    if (naukriPage && !naukriPage.isClosed()) {
+    // ─── STEP 5: Execute Naukri Pipeline ───
+    if (enabledPortals.includes('naukri')) {
+      console.log('[Init] Starting Naukri Pipeline...');
+      const naukriPage = await context.newPage();
+      globalMainPages.add(naukriPage);
       try {
         await naukriPage.bringToFront();
+        await naukriPage.goto('https://www.naukri.com/senior-frontend-developer-jobs-in-india?k=senior%20frontend%20developer&l=india&sort=freshness', { waitUntil: 'domcontentloaded' }).catch(() => { });
         await runNaukriPipeline(naukriPage);
       } catch (e: any) {
         console.error('[Naukri] Pipeline failed with error:', e.message);
+      } finally {
+        globalMainPages.delete(naukriPage);
+        await naukriPage.close().catch(() => { });
       }
     }
 
     console.log('\n=== All pipelines completed successfully! ===');
-    await context.close().catch(() => {});
+    await context.close().catch(() => { });
     process.exit(0);
 
   } catch (error: any) {

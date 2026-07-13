@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, exec } from 'child_process';
+import { spawn, ChildProcess, exec, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -210,6 +210,20 @@ class AutomationManager {
     (global as any)._runtimeInterval = val;
   }
 
+  private cleanupZombies() {
+    if (process.platform !== 'win32') return;
+    try {
+      console.log('[AutomationManager] Pre-run cleanup: killing zombie job-workers...');
+      execSync(`powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'node.exe'\\" | Where-Object { \\$_.CommandLine -like '*job-worker*' } | ForEach-Object { Stop-Process -Id \\$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
+      
+      console.log('[AutomationManager] Pre-run cleanup: killing zombie Chrome instances...');
+      execSync(`powershell -Command "Get-CimInstance Win32_Process -Filter \\"Name = 'chrome.exe'\\" | Where-Object { \\$_.CommandLine -like '*automation-profile*' } | ForEach-Object { Stop-Process -Id \\$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
+      console.log('[AutomationManager] Pre-run cleanup complete.');
+    } catch (err: any) {
+      console.warn(`[AutomationManager] Pre-run cleanup warning: ${err.message}`);
+    }
+  }
+
   public start(portals?: string[]): boolean {
     if (this.process) {
       console.log('[AutomationManager] Process already running.');
@@ -217,6 +231,9 @@ class AutomationManager {
     }
 
     console.log('[AutomationManager] Spawning job worker script with portals:', portals);
+    
+    // Clean any zombie Node/Chrome processes locking our Chrome profile directory
+    this.cleanupZombies();
     
     // Clear any dangling interval
     if (this.runtimeInterval) {
